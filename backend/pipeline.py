@@ -37,6 +37,11 @@ async def notify(db, severity: str, title: str, message: str, run_id: str | None
 async def get_settings(db) -> SettingsModel:
     doc = await db.settings.find_one({"_id": "singleton"}) or {}
     doc.pop("_id", None)
+    # The container uses the direct OpenAI SDK; migrate settings saved for the
+    # previous Emergent provider bridge instead of failing caption generation.
+    if doc.get("llm_provider") != "openai":
+        doc["llm_provider"] = "openai"
+        doc["llm_model"] = "gpt-4.1-mini"
     return SettingsModel(**doc)
 
 
@@ -94,17 +99,36 @@ async def run_pipeline(db, run_id: str):
             # ---- fetch ----
             await _update_stage(db, run_id, "fetch", "running")
             async with httpx.AsyncClient(follow_redirects=True) as client:
-                quotes, as_of = await sources.fetch_quotes(client)
-                indices, index_source = await sources.fetch_indices(client)
+                quotes, quote_as_of = await sources.fetch_quotes(client)
+                overview = await sources.fetch_market_overview(client)
+                indices = overview["indices"]
+                index_source = overview["source"]
+                as_of = overview.get("as_of") or quote_as_of
+                dividend_targets = list(dict.fromkeys(
+                    [*settings.reit_tickers, *settings.divy_tickers]
+                ))
                 try:
-                    div_items = await sources.fetch_dividends(client)
-                    dividends = [d.model_dump() for d in div_items]
+                    edge_items = await sources.fetch_dividends(
+                        client, days_back=365, detail_limit=64, target_symbols=dividend_targets,
+                    )
+                    history_items = await sources.fetch_dividend_history(client, dividend_targets, as_of)
+                    combined = edge_items + history_items
+                    unique = {}
+                    for item in combined:
+                        key = (
+                            item.symbol.upper(), item.ex_date or item.disclosure_date,
+                            item.dividend_per_share if item.dividend_per_share is not None else item.rate,
+                        )
+                        unique[key] = item
+                    dividends = [item.model_dump() for item in unique.values()]
                 except Exception as de:
                     warnings.append(f"Dividend source unavailable: {de}")
                     dividends = []
             await _update_stage(db, run_id, "fetch", "success", meta={
                 "quotes": len(quotes), "indices": len(indices),
                 "index_source": index_source, "dividends": len(dividends),
+                "market_as_of": as_of.isoformat(),
+                "official_market_stats": bool(overview.get("stats")),
             })
 
             # ---- validate ----
@@ -117,10 +141,16 @@ async def run_pipeline(db, run_id: str):
 
             # ---- compute ----
             await _update_stage(db, run_id, "compute", "running")
-            snapshot = compute_mod.compute_snapshot(quotes, indices, as_of, settings.reit_tickers)
+            snapshot = compute_mod.compute_snapshot(
+                quotes, indices, as_of, settings.reit_tickers, settings.divy_tickers,
+                settings.psei_tickers, overview.get("stats"), dividends,
+            )
+            snapshot["market_data_source"] = overview["source"]
+            snapshot["market_totals_source"] = "pse-edge" if overview.get("stats") else "derived"
             await _update_stage(db, run_id, "compute", "success", meta={
                 "gainers": len(snapshot["gainers"]), "losers": len(snapshot["losers"]),
-                "reits": len(snapshot["reits"]),
+                "actives": len(snapshot["actives"]), "psei_stocks": len(snapshot["psei_stocks"]),
+                "reits": len(snapshot["reit_metrics"]), "divy": len(snapshot["divy_metrics"]),
             })
 
             # ---- store ----

@@ -37,7 +37,7 @@ def _peso_short(v: float) -> str:
     return f"\u20b1{v:,.0f}"
 
 
-def _shell(title: str, subtitle: str, body: str, brand: str = "PSE Daily Pulse", footer_note: str = "Data: PSE via Phisix \u00b7 TradingView \u00b7 PSE Edge") -> str:
+def _shell(title: str, subtitle: str, body: str, brand: str = "PSE Daily Pulse", footer_note: str = "Data: PSE Edge \u00b7 quote feed fallbacks") -> str:
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>{BASE_CSS}</style></head><body>
 <div class="brand">{brand}</div>
 <h1>{title}</h1>
@@ -76,7 +76,7 @@ def market_summary_html(snapshot: dict, brand: str) -> str:
   <div class="card" style="flex:1;padding:24px 28px"><div style="font-size:42px;font-weight:800;color:{GAIN}">{s['advancers']}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Advancers</div></div>
   <div class="card" style="flex:1;padding:24px 28px"><div style="font-size:42px;font-weight:800;color:{LOSS}">{s['decliners']}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Decliners</div></div>
   <div class="card" style="flex:1;padding:24px 28px"><div style="font-size:42px;font-weight:800;color:#8b9bbd">{s['unchanged']}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Unchanged</div></div>
-  <div class="card" style="flex:1.4;padding:24px 28px"><div style="font-size:42px;font-weight:800">{_peso_short(s['approx_value_turnover'])}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Approx. turnover</div></div>
+  <div class="card" style="flex:1.4;padding:24px 28px"><div style="font-size:42px;font-weight:800">{_peso_short(s.get('value_turnover', s['approx_value_turnover']))}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Value turnover</div></div>
 </div>
 <div style="display:flex;gap:24px;margin-top:32px">
   <div style="flex:1"><div style="font-family:'Space Grotesk';font-size:26px;color:{GAIN};letter-spacing:2px;margin-bottom:14px">TOP GAINERS</div>{mini_rows(gainers, True)}</div>
@@ -92,7 +92,8 @@ def movers_html(snapshot: dict, brand: str) -> str:
         out = f'<div style="font-family:\'Space Grotesk\';font-size:26px;letter-spacing:2px;margin:26px 0 12px;color:#8b9bbd">{title}</div>'
         for i, q in enumerate(rows[:5]):
             if mode == "active":
-                right = f'<span style="font-weight:700;color:#c7d3ec">{_peso_short(q["value_traded"])}</span>'
+                trades = f'{q["trades"]:,} trades' if q.get("trades") is not None else "trades —"
+                right = f'<span style="font-weight:700;color:#c7d3ec">{_peso_short(q["value_traded"])} · {trades}</span>'
             else:
                 c = GAIN if q["percent_change"] >= 0 else LOSS
                 right = f'<span style="font-weight:800;color:{c}">{q["percent_change"]:+.2f}%</span>'
@@ -147,15 +148,20 @@ def sectors_html(snapshot: dict, brand: str) -> str:
 def reits_html(snapshot: dict, brand: str) -> str:
     s = snapshot["summary"]
     rows = ""
-    for q in snapshot["reits"][:8]:
-        up = q["percent_change"] >= 0
-        c = GAIN if up else (LOSS if q["percent_change"] < 0 else MUTED)
+    for q in snapshot.get("reit_metrics", snapshot.get("reits", []))[:8]:
+        ticker = q.get("ticker", q.get("symbol", "—"))
+        change = q.get("percent_change") or 0
+        up = change >= 0
+        c = GAIN if up else (LOSS if change < 0 else MUTED)
+        yield_text = f"{q['yield_ttm']:.2f}% TTM yield" if q.get("yield_ttm") is not None else "TTM yield unavailable"
+        minimum_text = f"Min ₱{q['minimum_investment']:,.2f}" if q.get("minimum_investment") is not None else "Minimum unavailable"
+        price_text = f"₱{q['price']:,.2f}" if q.get("price") is not None else "Price unavailable"
         rows += (f'<div style="display:flex;align-items:center;padding:22px 30px;background:#0d1630;border:1px solid #16203c;'
                  f'border-radius:14px;margin-bottom:12px;font-size:30px">'
-                 f'<span style="font-weight:800;width:200px">{q["symbol"]}</span>'
-                 f'<span style="color:#8b9bbd;flex:1;font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:16px">{q["name"][:38]}</span>'
-                 f'<span style="width:200px;text-align:right">\u20b1{q["price"]:,.2f}</span>'
-                 f'<span style="width:180px;text-align:right;font-weight:800;color:{c}">{q["percent_change"]:+.2f}%</span></div>')
+                 f'<span style="font-weight:800;width:180px">{ticker}</span>'
+                 f'<span style="color:#8b9bbd;flex:1;font-size:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:16px">{yield_text} · {minimum_text}</span>'
+                 f'<span style="width:180px;text-align:right">{price_text}</span>'
+                 f'<span style="width:150px;text-align:right;font-weight:800;color:{c}">{change:+.2f}%</span></div>')
     if not rows:
         rows = '<div class="card" style="padding:40px;text-align:center;color:#5b6a8a;font-size:28px">REIT data unavailable today</div>'
     body = f'<div style="margin-top:36px">{rows}</div>'
@@ -185,7 +191,7 @@ def dividends_html(snapshot: dict, dividends: list[dict], brand: str) -> str:
   <div style="color:#8b9bbd;font-size:23px;margin-top:10px">{meta_html}</div>
 </div>"""
     if not cards:
-        cards = '<div class="card" style="padding:48px;text-align:center;color:#5b6a8a;font-size:28px">No cash dividend declarations in the last 3 weeks</div>'
+        cards = '<div class="card" style="padding:48px;text-align:center;color:#5b6a8a;font-size:28px">No cash dividend declarations found in the TTM window</div>'
     body = f'<div style="margin-top:34px">{cards}</div>'
     return _shell("Dividend Watch", f"Declarations \u00b7 as of {_fmt_date(s['market_date'])}", body, brand,
                   footer_note="Source: PSE Edge disclosures")

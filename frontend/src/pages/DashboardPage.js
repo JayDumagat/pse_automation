@@ -38,7 +38,10 @@ const MoversTable = ({ rows, mode, testId }) => (
           <TableCell className="text-right font-mono tabular-nums">₱{fmtNum(q.price)}</TableCell>
           <TableCell className="text-right">
             {mode === "active" ? (
-              <span className="font-mono tabular-nums">{pesoShort(q.value_traded)}</span>
+              <div className="font-mono tabular-nums">
+                <div>{pesoShort(q.value_traded)}</div>
+                <div className="text-[11px] text-muted-foreground">{q.trades === null || q.trades === undefined ? "trades —" : `${fmtNum(q.trades, 0)} trades`}</div>
+              </div>
             ) : (
               <Delta value={q.percent_change} />
             )}
@@ -47,6 +50,62 @@ const MoversTable = ({ rows, mode, testId }) => (
       ))}
     </TableBody>
   </Table>
+);
+
+const IndexBoardTable = ({ rows }) => (
+  <div className="overflow-x-auto">
+    <Table data-testid="index-board-table">
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead>Index</TableHead>
+          <TableHead className="text-right">Value</TableHead>
+          <TableHead className="text-right">Chg pts</TableHead>
+          <TableHead className="text-right">Chg %</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {(rows || []).map((index) => (
+          <TableRow key={index.name} className="hover:bg-accent/40">
+            <TableCell className="font-medium">{index.name}</TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{fmtNum(index.value)}</TableCell>
+            <TableCell className="text-right"><Delta value={index.change_points} /></TableCell>
+            <TableCell className="text-right"><Delta value={index.change_percent} /></TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
+);
+
+const IncomeTable = ({ rows, kind, testId }) => (
+  <div className="overflow-x-auto">
+    <Table data-testid={testId}>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead>Ticker</TableHead>
+          <TableHead className="text-right">Price</TableHead>
+          <TableHead className="text-right">Chg %</TableHead>
+          <TableHead className="text-right">{kind === "reit" ? "Value turnover" : "Div/share TTM"}</TableHead>
+          <TableHead className="text-right">Yield TTM</TableHead>
+          <TableHead className="text-right">Min investment</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {(rows || []).map((item) => (
+          <TableRow key={item.ticker} className="hover:bg-accent/40">
+            <TableCell className="font-mono font-semibold">{item.ticker}</TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{item.price === null || item.price === undefined ? "—" : `₱${fmtNum(item.price)}`}</TableCell>
+            <TableCell className="text-right"><Delta value={item.percent_change} /></TableCell>
+            <TableCell className="text-right font-mono tabular-nums">
+              {kind === "reit" ? pesoShort(item.value_turnover) : (item.dividend_per_share_ttm === null || item.dividend_per_share_ttm === undefined ? "—" : `₱${fmtNum(item.dividend_per_share_ttm, 4)}`)}
+            </TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{item.yield_ttm === null || item.yield_ttm === undefined ? "—" : `${fmtNum(item.yield_ttm)}%`}</TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{item.minimum_investment === null || item.minimum_investment === undefined ? "—" : `₱${fmtNum(item.minimum_investment)}`}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
 );
 
 export default function DashboardPage() {
@@ -135,8 +194,8 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 text-right">
-                    <div className="text-xs text-muted-foreground">Approx. value turnover</div>
-                    <div data-testid="turnover-value" className="font-mono text-2xl font-semibold tabular-nums">{pesoShort(s.approx_value_turnover)}</div>
+                    <div className="text-xs text-muted-foreground">Value turnover</div>
+                    <div data-testid="turnover-value" className="font-mono text-2xl font-semibold tabular-nums">{pesoShort(s.value_turnover ?? s.approx_value_turnover)}</div>
                     <div className="text-[11px] text-muted-foreground/70">as of {fmtDateTime(snap.as_of)}</div>
                   </div>
                 </div>
@@ -153,10 +212,31 @@ export default function DashboardPage() {
                   <span className="rounded-full border border-border bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
                     {s.total_quotes} securities
                   </span>
+                  <span className="rounded-full border border-border bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
+                    {s.total_trades === null || s.total_trades === undefined ? "—" : fmtNum(s.total_trades, 0)} total trades
+                  </span>
                 </div>
               </CardContent>
             </Card>
           </motion.div>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="font-display text-base">What happened</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p data-testid="market-explanation" className="text-sm leading-6 text-muted-foreground">{snap.explanation || "No market explanation was generated for this snapshot."}</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="font-display text-base">Index board</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <IndexBoardTable rows={snap.index_board || []} />
+            </CardContent>
+          </Card>
 
           {/* Sectors */}
           <Card>
@@ -265,17 +345,16 @@ export default function DashboardPage() {
               <CardTitle className="font-display text-base">REIT board</CardTitle>
             </CardHeader>
             <CardContent>
-              <Table data-testid="reit-table">
-                <TableBody>
-                  {(snap.reits || []).map((q) => (
-                    <TableRow key={q.symbol} className="hover:bg-accent/40">
-                      <TableCell className="py-2 font-mono font-semibold">{q.symbol}</TableCell>
-                      <TableCell className="py-2 text-right font-mono tabular-nums">₱{fmtNum(q.price)}</TableCell>
-                      <TableCell className="py-2 text-right"><Delta value={q.percent_change} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <IncomeTable rows={snap.reit_metrics || snap.reits || []} kind="reit" testId="reit-table" />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="font-display text-base">DivY board</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <IncomeTable rows={snap.divy_metrics || []} kind="divy" testId="divy-table" />
             </CardContent>
           </Card>
         </div>

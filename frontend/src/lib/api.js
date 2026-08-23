@@ -1,6 +1,8 @@
 import axios from "axios";
 
-export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// In Docker production, nginx proxies /api to the backend so the browser can
+// use the same origin. Keep the env override for local CRA development.
+export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
 export const API = `${BACKEND_URL}/api`;
 
 export const api = axios.create({ baseURL: API });

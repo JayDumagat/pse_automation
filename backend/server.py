@@ -116,6 +116,12 @@ async def most_active(limit: int = 10):
     return (snap or {}).get("actives", [])[:limit]
 
 
+@api.get("/stocks/psei")
+async def psei_stocks():
+    snap = await _latest_snapshot()
+    return (snap or {}).get("psei_stocks", [])
+
+
 @api.get("/sectors")
 async def sectors():
     snap = await _latest_snapshot()
@@ -125,7 +131,13 @@ async def sectors():
 @api.get("/reits")
 async def reits():
     snap = await _latest_snapshot()
-    return (snap or {}).get("reits", [])
+    return (snap or {}).get("reit_metrics", (snap or {}).get("reits", []))
+
+
+@api.get("/divy")
+async def divy():
+    snap = await _latest_snapshot()
+    return (snap or {}).get("divy_metrics", [])
 
 
 @api.get("/dividends")
@@ -326,6 +338,8 @@ async def update_settings(body: SettingsModel):
     except Exception:
         raise HTTPException(400, "schedule_time must be HH:MM")
     body.reit_tickers = [t.strip().upper() for t in body.reit_tickers if t.strip()]
+    body.divy_tickers = ["MER" if t.strip().upper() == "MERIT" else t.strip().upper() for t in body.divy_tickers if t.strip()]
+    body.psei_tickers = [t.strip().upper() for t in body.psei_tickers if t.strip()]
     await db.settings.update_one({"_id": "singleton"}, {"$set": body.model_dump()}, upsert=True)
     _reschedule(body)
     return body.model_dump()
