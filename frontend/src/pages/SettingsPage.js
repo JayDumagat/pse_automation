@@ -10,21 +10,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState(null);
-  const [models, setModels] = useState({});
   const [newTicker, setNewTicker] = useState("");
+  const [newDivyTicker, setNewDivyTicker] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [sRes, mRes] = await Promise.all([api.get("/settings"), api.get("/settings/models")]);
+      const sRes = await api.get("/settings");
       setSettings(sRes.data);
-      setModels(mRes.data);
     } catch {
       toast.error("Failed to load settings");
     }
@@ -56,48 +54,15 @@ export default function SettingsPage() {
 
   if (!settings) return <div className="py-24 text-center text-sm text-muted-foreground">Loading…</div>;
 
-  const providerModels = models[settings.llm_provider] || [];
-
   return (
     <div className="max-w-3xl space-y-6">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="font-display text-base">AI captions — LLM provider</CardTitle>
+          <CardTitle className="font-display text-base">Manual captions</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Provider</Label>
-              <Select
-                value={settings.llm_provider}
-                onValueChange={(v) => setSettings((s) => ({ ...s, llm_provider: v, llm_model: (models[v] || [])[0] || "" }))}
-              >
-                <SelectTrigger data-testid="settings-llm-provider-select" className="bg-secondary/40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-border bg-popover">
-                  {Object.keys(models).map((p) => (
-                    <SelectItem key={p} value={p} data-testid={`settings-provider-option-${p}`}>{p}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Model</Label>
-              <Select value={settings.llm_model} onValueChange={(v) => setSettings((s) => ({ ...s, llm_model: v }))}>
-                <SelectTrigger data-testid="settings-llm-model-select" className="bg-secondary/40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-border bg-popover">
-                  {providerModels.map((m) => (
-                    <SelectItem key={m} value={m} data-testid={`settings-model-option-${m}`}>{m}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Captions are generated with the Emergent universal key — switch provider/model any time; the next generation uses the new selection.
+        <CardContent>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Automatic AI caption generation is disabled. After each run, open the Captions page to write, edit, and save the final copy manually for each platform.
           </p>
         </CardContent>
       </Card>
@@ -184,6 +149,56 @@ export default function SettingsPage() {
               onClick={() => {
                 setSettings((s) => ({ ...s, reit_tickers: [...new Set([...s.reit_tickers, newTicker.trim()])] }));
                 setNewTicker("");
+              }}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add
+            </Button>
+          </div>
+          </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="font-display text-base">DivY stock tickers</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">Maintain your own dividend-stock selection. The daily board is sorted by highest positive change.</p>
+          <div data-testid="settings-divy-tickers" className="flex flex-wrap gap-2">
+            {settings.divy_tickers.map((t) => (
+              <Badge key={t} variant="outline" className="gap-1.5 border-border bg-secondary/60 py-1.5 pl-3 pr-1.5 font-mono">
+                {t}
+                <button
+                  data-testid={`settings-divy-remove-${t}`}
+                  aria-label={`Remove ${t}`}
+                  onClick={() => setSettings((s) => ({ ...s, divy_tickers: s.divy_tickers.filter((x) => x !== t) }))}
+                  className="rounded-full p-0.5 transition-colors duration-150 hover:bg-accent"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              data-testid="settings-divy-add-input"
+              value={newDivyTicker}
+              onChange={(e) => setNewDivyTicker(e.target.value.toUpperCase())}
+              placeholder="Add ticker e.g. DMC"
+              className="max-w-52 bg-secondary/40 font-mono"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newDivyTicker.trim()) {
+                  setSettings((s) => ({ ...s, divy_tickers: [...new Set([...s.divy_tickers, newDivyTicker.trim()])] }));
+                  setNewDivyTicker("");
+                }
+              }}
+            />
+            <Button
+              data-testid="settings-divy-add-button"
+              variant="secondary"
+              disabled={!newDivyTicker.trim()}
+              onClick={() => {
+                setSettings((s) => ({ ...s, divy_tickers: [...new Set([...s.divy_tickers, newDivyTicker.trim()])] }));
+                setNewDivyTicker("");
               }}
             >
               <Plus className="mr-1 h-4 w-4" /> Add

@@ -26,7 +26,7 @@ docker compose down -v
 
 ## API key
 
-Market data sources do not require an API key. Caption generation requires `OPENAI_API_KEY` in `.env`; without it, the pipeline still runs but the captions stage will finish with a warning. Caption generation currently uses the direct OpenAI API.
+No API key is required. Market data is collected from PSE/Phisix, PSE Edge, TradingView, and Investagrams. Captions are manual input in the dashboard; no automatic LLM call is made.
 
 ## Services
 

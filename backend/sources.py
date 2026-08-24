@@ -38,6 +38,9 @@ YAHOO_TICKERS = {
 SECTOR_NAMES = ["Financials", "Industrial", "Holding Firms", "Property", "Services", "Mining & Oil"]
 
 PSE_INDEX_SUMMARY_URL = "https://edge.pse.com.ph/index/form.do"
+PSE_COMPANY_DIRECTORY_URL = "https://edge.pse.com.ph/companyDirectory/form.do"
+PSE_STOCK_DATA_URL = "https://edge.pse.com.ph/companyPage/stockData.do"
+INVESTAGRAM_STOCK_URL = "https://www.investagrams.com/Stock/PSE:{symbol}"
 PSE_INDEX_NAMES = {
     "psei": "PSEi",
     "all shares": "All Shares",
@@ -194,6 +197,177 @@ async def _fetch_indices_tradingview(client: httpx.AsyncClient) -> dict[str, Ind
     if "PSEi" not in out:
         raise ValueError("PSEi missing from TradingView response")
     return out
+
+
+async def fetch_tradingview_stock_metrics(
+    client: httpx.AsyncClient,
+    symbols: list[str],
+) -> dict[str, dict]:
+    """Fetch trailing dividend metrics for selected PSE stocks from TradingView."""
+    targets = [_normalise_symbol(symbol) for symbol in symbols if _normalise_symbol(symbol)]
+    if not targets:
+        return {}
+    columns = [
+        "name", "close", "dividends_yield", "dividends_yield_current",
+        "dividend_yield_recent", "dps_common_stock_prim_issue_ttm",
+    ]
+    payload = {
+        "symbols": {
+            "tickers": [f"PSE:{symbol}" for symbol in targets],
+            "query": {"types": []},
+        },
+        "columns": columns,
+    }
+    response = await client.post(
+        "https://scanner.tradingview.com/philippines/scan",
+        json=payload,
+        timeout=25,
+        headers={"User-Agent": UA},
+    )
+    response.raise_for_status()
+    metrics: dict[str, dict] = {}
+    for row in response.json().get("data", []):
+        symbol = _normalise_symbol(str(row.get("s", "")).split(":")[-1])
+        if symbol not in targets:
+            continue
+        values = dict(zip(columns, row.get("d", [])))
+        yield_value = next(
+            (values.get(field) for field in (
+                "dividends_yield", "dividends_yield_current", "dividend_yield_recent",
+            ) if values.get(field) is not None),
+            None,
+        )
+        dps = values.get("dps_common_stock_prim_issue_ttm")
+        metrics[symbol] = {
+            "yield_ttm": round(float(yield_value), 4) if yield_value is not None else None,
+            "dividend_per_share_ttm": round(float(dps), 8) if dps is not None else None,
+            "yield_source": "tradingview" if yield_value is not None else None,
+        }
+    return metrics
+
+
+def _parse_pse_company_ids(html: str, target_symbols: set[str]) -> dict[str, tuple[str, str]]:
+    """Map PSE symbols to company/security IDs from the public directory."""
+    soup = BeautifulSoup(html, "html.parser")
+    found: dict[str, tuple[str, str]] = {}
+    for anchor in soup.select("a[onclick]"):
+        symbol = _normalise_symbol(anchor.get_text(" ", strip=True))
+        if symbol not in target_symbols or symbol in found:
+            continue
+        match = re.search(
+            r"cmDetail\(\s*['\"](\d+)['\"]\s*,\s*['\"](\d+)['\"]\s*\)",
+            anchor.get("onclick", ""),
+            re.I,
+        )
+        if match:
+            found[symbol] = (match.group(1), match.group(2))
+    return found
+
+
+async def fetch_board_lots(client: httpx.AsyncClient, symbols: list[str]) -> dict[str, int]:
+    """Fetch exact per-security Board Lot values from PSE Edge stock pages."""
+    targets = {_normalise_symbol(symbol) for symbol in symbols if _normalise_symbol(symbol)}
+    if not targets:
+        return {}
+    directory = await client.get(
+        PSE_COMPANY_DIRECTORY_URL,
+        timeout=30,
+        headers={"User-Agent": UA},
+    )
+    directory.raise_for_status()
+    company_ids = _parse_pse_company_ids(directory.text, targets)
+    if not company_ids:
+        raise ValueError("PSE Edge company directory did not contain the requested tickers")
+
+    sem = asyncio.Semaphore(6)
+    lots: dict[str, int] = {}
+
+    async def fetch_one(symbol: str, ids: tuple[str, str]):
+        async with sem:
+            try:
+                response = await client.get(
+                    PSE_STOCK_DATA_URL,
+                    params={"cmpy_id": ids[0], "security_id": ids[1]},
+                    timeout=25,
+                    headers={"User-Agent": UA, "Referer": PSE_COMPANY_DIRECTORY_URL},
+                )
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                for row in soup.find_all("tr"):
+                    cells = row.find_all(["th", "td"])
+                    if len(cells) < 2:
+                        continue
+                    label = cells[0].get_text(" ", strip=True).lower()
+                    if label != "board lot":
+                        continue
+                    match = re.search(r"\d[\d,]*", cells[1].get_text(" ", strip=True))
+                    if match:
+                        lots[symbol] = int(match.group(0).replace(",", ""))
+                    return
+                logger.warning("PSE Edge Board Lot field missing for %s", symbol)
+            except Exception as e:
+                logger.warning("PSE Edge Board Lot fetch failed for %s: %s", symbol, e)
+
+    await asyncio.gather(*(fetch_one(symbol, ids) for symbol, ids in company_ids.items()))
+    return lots
+
+
+def _parse_human_count(value: str) -> int | None:
+    """Parse Investagrams values such as 5.51K or 1.2M into an integer."""
+    match = re.search(r"(\d[\d,]*(?:\.\d+)?)\s*([KMB])?", value or "", re.I)
+    if not match:
+        return None
+    number = float(match.group(1).replace(",", ""))
+    multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get(
+        (match.group(2) or "").upper(), 1,
+    )
+    return int(round(number * multiplier))
+
+
+async def fetch_investagram_trade_counts(symbols: list[str]) -> dict[str, int]:
+    """Scrape latest Trades values from each Investagrams Historical Data tab."""
+    targets = [_normalise_symbol(symbol) for symbol in symbols if _normalise_symbol(symbol)]
+    if not targets:
+        return {}
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        logger.warning("Investagrams trade scraper unavailable: %s", e)
+        return {}
+
+    counts: dict[str, int] = {}
+    try:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            context = await browser.new_context(user_agent=UA)
+            page = await context.new_page()
+            for symbol in targets:
+                try:
+                    await page.goto(
+                        INVESTAGRAM_STOCK_URL.format(symbol=symbol),
+                        wait_until="domcontentloaded",
+                        timeout=35_000,
+                    )
+                    await page.get_by_text("Historical Data", exact=True).click(timeout=15_000)
+                    rows = page.locator("#stockHistoricalData table tbody tr")
+                    await rows.first.wait_for(state="attached", timeout=20_000)
+                    for index in range(min(await rows.count(), 10)):
+                        cells = await rows.nth(index).locator("td").all_text_contents()
+                        if len(cells) < 11:
+                            continue
+                        trades = _parse_human_count(cells[-1])
+                        if trades is not None:
+                            counts[symbol] = trades
+                            break
+                except Exception as e:
+                    logger.warning("Investagrams trade count fetch failed for %s: %s", symbol, e)
+                await page.wait_for_timeout(250)
+            await browser.close()
+    except Exception as e:
+        logger.warning("Investagrams trade scraper failed: %s", e)
+    return counts
 
 
 async def _fetch_indices_yahoo(client: httpx.AsyncClient) -> dict[str, IndexQuote]:

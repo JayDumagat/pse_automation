@@ -25,7 +25,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import pipeline  # noqa: E402
 import renderer  # noqa: E402
-from models import AVAILABLE_MODELS, GRAPHIC_TYPES, PLATFORMS, SettingsModel  # noqa: E402
+from models import GRAPHIC_TYPES, PLATFORMS, SettingsModel  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("server")
@@ -184,12 +184,11 @@ async def regenerate(run_id: str, body: RegenerateRequest):
     run = await db.runs.find_one({"id": run_id}, {"_id": 0})
     if not run:
         raise HTTPException(404, "Run not found")
+    if body.target != "graphics":
+        raise HTTPException(409, "Automatic captions are disabled. Enter and save captions manually.")
     results = {}
     try:
-        if body.target in ("graphics", "all"):
-            results["graphics"] = await pipeline.regenerate_graphics(db, run_id)
-        if body.target in ("captions", "all"):
-            results["captions"] = await pipeline.regenerate_all_captions(db, run_id)
+        results["graphics"] = await pipeline.regenerate_graphics(db, run_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"run_id": run_id, "regenerated": results}
@@ -261,25 +260,7 @@ async def update_caption(run_id: str, platform: str, body: CaptionUpdate):
 
 @api.post("/runs/{run_id}/captions/{platform}/regenerate")
 async def regenerate_caption_ep(run_id: str, platform: str):
-    if platform not in PLATFORMS:
-        raise HTTPException(400, "Unknown platform")
-    snap = await db.snapshots.find_one({"run_id": run_id}, {"_id": 0})
-    if not snap:
-        raise HTTPException(400, "No snapshot for this run")
-    settings = await pipeline.get_settings(db)
-    import llm_service
-    try:
-        text = await llm_service.regenerate_caption(snap, platform, settings.llm_provider, settings.llm_model)
-    except Exception as e:
-        raise HTTPException(502, f"LLM generation failed: {e}")
-    await db.captions.update_one(
-        {"run_id": run_id, "platform": platform},
-        {"$set": {"text": text, "provider": settings.llm_provider, "model": settings.llm_model,
-                  "edited": False, "updated_at": now_iso()},
-         "$setOnInsert": {"id": str(uuid.uuid4()), "run_id": run_id, "platform": platform}},
-        upsert=True)
-    doc = await db.captions.find_one({"run_id": run_id, "platform": platform}, {"_id": 0})
-    return doc
+    raise HTTPException(409, "Automatic captions are disabled. Enter and save captions manually.")
 
 
 # ------------------------- publishing -------------------------
@@ -328,26 +309,20 @@ async def get_settings_ep():
 
 @api.put("/settings")
 async def update_settings(body: SettingsModel):
-    if body.llm_provider not in AVAILABLE_MODELS:
-        raise HTTPException(400, "Unknown provider")
-    if body.llm_model not in AVAILABLE_MODELS[body.llm_provider]:
-        raise HTTPException(400, f"Model not available for {body.llm_provider}")
     try:
         hh, mm = body.schedule_time.split(":")
         assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
     except Exception:
         raise HTTPException(400, "schedule_time must be HH:MM")
-    body.reit_tickers = [t.strip().upper() for t in body.reit_tickers if t.strip()]
-    body.divy_tickers = ["MER" if t.strip().upper() == "MERIT" else t.strip().upper() for t in body.divy_tickers if t.strip()]
-    body.psei_tickers = [t.strip().upper() for t in body.psei_tickers if t.strip()]
+    body.reit_tickers = list(dict.fromkeys(t.strip().upper() for t in body.reit_tickers if t.strip()))
+    body.divy_tickers = list(dict.fromkeys(
+        "MER" if t.strip().upper() == "MERIT" else t.strip().upper()
+        for t in body.divy_tickers if t.strip()
+    ))
+    body.psei_tickers = list(dict.fromkeys(t.strip().upper() for t in body.psei_tickers if t.strip()))
     await db.settings.update_one({"_id": "singleton"}, {"$set": body.model_dump()}, upsert=True)
     _reschedule(body)
     return body.model_dump()
-
-
-@api.get("/settings/models")
-async def models_catalog():
-    return AVAILABLE_MODELS
 
 
 # ------------------------- scheduler -------------------------

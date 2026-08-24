@@ -31,27 +31,6 @@ def _parse_date(value: str | None) -> date | None:
     return None
 
 
-def board_lot(price: float) -> int | None:
-    """PSE minimum board lot by price band, from the official lot table."""
-    if price is None or price <= 0:
-        return None
-    if price < 0.01:
-        return 1_000_000
-    if price < 0.05:
-        return 100_000
-    if price < 0.50:
-        return 10_000
-    if price < 5.00:
-        return 1_000
-    if price < 50.00:
-        return 100
-    if price < 500.00:
-        return 10
-    if price < 5_000.00:
-        return 5
-    return 5
-
-
 def _dividend_totals(dividends: list[dict] | None, as_of: datetime) -> dict[str, float]:
     """Sum unique cash distributions during the trailing 365-day window."""
     totals: dict[str, float] = {}
@@ -85,25 +64,43 @@ def _dividend_totals(dividends: list[dict] | None, as_of: datetime) -> dict[str,
     return totals
 
 
-def _quote_metric(ticker: str, quote: StockQuote | None, dividend_totals: dict[str, float]) -> dict[str, Any]:
+def _quote_metric(
+    ticker: str,
+    quote: StockQuote | None,
+    dividend_totals: dict[str, float],
+    tradingview_metrics: dict[str, dict] | None = None,
+    board_lots: dict[str, int] | None = None,
+) -> dict[str, Any]:
     symbol = _normalise_symbol(ticker)
+    tv_metric = (tradingview_metrics or {}).get(symbol, {})
+    lot = (board_lots or {}).get(symbol)
     if quote is None:
         return {
             "ticker": symbol, "symbol": symbol, "name": "", "price": None,
             "percent_change": None, "value_traded": None, "value_turnover": None,
             "trades": None, "dividend_per_share_ttm": None, "yield_ttm": None,
-            "board_lot": None, "minimum_investment": None, "data_status": "missing_quote",
+            "yield_source": None, "board_lot": lot,
+            "board_lot_source": "pse-edge" if lot is not None else None,
+            "minimum_investment": None, "data_status": "missing_quote",
         }
-    dps = dividend_totals.get(symbol)
-    lot = board_lot(quote.price)
+    tv_dps = tv_metric.get("dividend_per_share_ttm")
+    dps = tv_dps if tv_dps is not None else dividend_totals.get(symbol)
     minimum = round(quote.price * lot, 2) if lot else None
-    yield_ttm = round(dps / quote.price * 100, 2) if dps is not None and quote.price > 0 else None
+    tv_yield = tv_metric.get("yield_ttm")
+    if tv_yield is not None:
+        yield_ttm = round(float(tv_yield), 2)
+        yield_source = "tradingview"
+    else:
+        yield_ttm = round(dps / quote.price * 100, 2) if dps is not None and quote.price > 0 else None
+        yield_source = "derived" if yield_ttm is not None else None
     return {
         "ticker": symbol, "symbol": symbol, "name": quote.name, "price": quote.price,
         "percent_change": quote.percent_change, "volume": quote.volume,
         "value_traded": quote.value_traded, "value_turnover": quote.value_traded,
         "trades": quote.trades, "dividend_per_share_ttm": dps, "yield_ttm": yield_ttm,
-        "board_lot": lot, "minimum_investment": minimum, "data_status": "ok",
+        "yield_source": yield_source, "board_lot": lot,
+        "board_lot_source": "pse-edge" if lot is not None else None,
+        "minimum_investment": minimum, "data_status": "ok",
     }
 
 
@@ -141,6 +138,8 @@ def compute_snapshot(
     psei_tickers: list[str] | None = None,
     market_stats: dict | None = None,
     dividends: list[dict] | None = None,
+    tradingview_metrics: dict[str, dict] | None = None,
+    board_lots: dict[str, int] | None = None,
 ) -> dict:
     """Build the complete daily snapshot from quote, index, and market-total inputs."""
     psei = indices["PSEi"]
@@ -186,11 +185,19 @@ def compute_snapshot(
     reit_tickers = [_normalise_symbol(t) for t in (reit_tickers or REIT_TICKERS)]
     divy_tickers = [_normalise_symbol(t) for t in (divy_tickers or DIVY_TICKERS)]
     dividend_totals = _dividend_totals(dividends, as_of)
-    reit_metrics = [_quote_metric(t, quote_map.get(t), dividend_totals) for t in reit_tickers]
-    divy_metrics = [_quote_metric(t, quote_map.get(t), dividend_totals) for t in divy_tickers]
-    yield_sort = lambda item: (item["yield_ttm"] is None, -(item["yield_ttm"] or 0), item["ticker"])
-    reit_metrics.sort(key=yield_sort)
-    divy_metrics.sort(key=yield_sort)
+    reit_metrics = [
+        _quote_metric(t, quote_map.get(t), dividend_totals, tradingview_metrics, board_lots)
+        for t in reit_tickers
+    ]
+    divy_metrics = [
+        _quote_metric(t, quote_map.get(t), dividend_totals, tradingview_metrics, board_lots)
+        for t in divy_tickers
+    ]
+    # The boards are daily movers first. Positive changes naturally lead;
+    # unchanged and negative rows follow in descending order.
+    change_sort = lambda item: (item["percent_change"] is None, -(item["percent_change"] or 0), item["ticker"])
+    reit_metrics.sort(key=change_sort)
+    divy_metrics.sort(key=change_sort)
 
     summary = MarketSummary(
         market_date=as_of.date().isoformat(), psei_value=psei.value,
@@ -225,6 +232,11 @@ def compute_snapshot(
             "psei_missing": missing_psei,
             "reits_expected": len(reit_tickers), "reits_found": sum(1 for x in reit_metrics if x["data_status"] == "ok"),
             "divy_expected": len(divy_tickers), "divy_found": sum(1 for x in divy_metrics if x["data_status"] == "ok"),
+            "reit_board_lots_found": sum(1 for x in reit_metrics if x.get("board_lot") is not None),
+            "divy_board_lots_found": sum(1 for x in divy_metrics if x.get("board_lot") is not None),
+            "tradingview_yields_found": sum(
+                1 for x in reit_metrics + divy_metrics if x.get("yield_source") == "tradingview"
+            ),
             "psei_trade_counts_found": sum(1 for q in psei_quotes if q.trades is not None),
         },
     }
@@ -254,12 +266,21 @@ def qa_checks(snapshot: dict, graphics: list[dict], captions: list[dict]) -> lis
         rows = snapshot.get(key, [])
         missing_prices = [row["ticker"] for row in rows if row.get("price") is None]
         missing_yields = [row["ticker"] for row in rows if row.get("yield_ttm") is None]
+        fallback_yields = [
+            row["ticker"] for row in rows
+            if row.get("yield_ttm") is not None and row.get("yield_source") != "tradingview"
+        ]
+        missing_lots = [row["ticker"] for row in rows if row.get("board_lot") is None]
         if missing_prices:
             flag("warning", f"{key}_prices", f"Missing {label} prices: " + ", ".join(missing_prices))
         if missing_yields:
             flag("warning", f"{key}_ttm", f"Missing {label} TTM dividend data: " + ", ".join(missing_yields))
+        if fallback_yields:
+            flag("warning", f"{key}_yield_source", f"{label} TTM yield fell back to a derived value for: " + ", ".join(fallback_yields))
+        if missing_lots:
+            flag("warning", f"{key}_board_lot", f"Missing PSE Edge Board Lot: " + ", ".join(missing_lots))
     if any(q.get("trades") is None for q in snapshot.get("actives", [])):
-        flag("warning", "per_stock_trades", "Per-stock trade counts are unavailable from the configured public quote feeds; total market trades are still sourced officially.")
+        flag("warning", "per_stock_trades", "Some PSEi per-stock trade counts were not available from the Investagrams Historical Data tab.")
     if len(graphics) < 5:
         flag("warning", "graphics_count", f"Only {len(graphics)}/5 graphics were generated")
     for g in graphics:
@@ -268,5 +289,8 @@ def qa_checks(snapshot: dict, graphics: list[dict], captions: list[dict]) -> lis
     have = {c["platform"] for c in captions if (c.get("text") or "").strip()}
     missing = [p for p in ["instagram", "facebook", "linkedin", "x"] if p not in have]
     if missing:
-        flag("warning", "captions_missing", "Missing captions for: " + ", ".join(missing))
+        if captions and all(c.get("provider") == "manual" for c in captions):
+            flag("info", "captions_manual", "Captions are manual input and are still blank for: " + ", ".join(missing))
+        else:
+            flag("warning", "captions_missing", "Missing captions for: " + ", ".join(missing))
     return flags

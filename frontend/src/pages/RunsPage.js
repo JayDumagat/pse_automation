@@ -53,7 +53,7 @@ export default function RunsPage() {
     setRegenerating(target);
     try {
       await api.post(`/runs/${run.id}/regenerate`, { target });
-      toast.success(`${target === "graphics" ? "Graphics" : "Captions"} regenerated`);
+      toast.success("Graphics regenerated");
       load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Regeneration failed");
@@ -74,7 +74,7 @@ export default function RunsPage() {
       <EmptyState
         icon={ImagePlay}
         title="No pipeline runs yet"
-        message="Start the daily pipeline: fetch PSE data, validate, compute, render graphics, and generate captions."
+        message="Start the daily pipeline: fetch PSE data, validate, compute, render graphics, then enter captions manually."
         actionLabel={triggering ? "Starting…" : "Trigger run"}
         onAction={trigger}
         actionTestId="runs-first-trigger-button"
@@ -114,15 +114,6 @@ export default function RunsPage() {
             >
               <RefreshCcw className={`mr-1.5 h-4 w-4 ${regenerating === "graphics" ? "animate-spin" : ""}`} />
               Regenerate graphics
-            </Button>
-            <Button
-              data-testid="regenerate-captions-button"
-              variant="secondary"
-              disabled={!hasSnapshot || isRunning || regenerating !== null}
-              onClick={() => regenerate("captions")}
-            >
-              <RefreshCcw className={`mr-1.5 h-4 w-4 ${regenerating === "captions" ? "animate-spin" : ""}`} />
-              Regenerate captions
             </Button>
           </div>
         </CardContent>

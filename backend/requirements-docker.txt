@@ -3,7 +3,6 @@ beautifulsoup4==4.15.0
 fastapi==0.110.1
 httpx==0.28.1
 motor==3.7.1
-openai==1.99.9
 playwright==1.62.0
 pydantic==2.13.4
 pymongo==4.14.1

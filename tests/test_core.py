@@ -4,7 +4,7 @@ Proves in isolation:
   A) Real PSE data fetch: Phisix quotes + Yahoo PSEi/sector indices + PSE Edge dividends
   B) Pydantic validation + deterministic computations (no LLM math)
   C) HTML template -> PNG via Playwright
-  D) LLM captions via emergentintegrations with provider switching (OpenAI + Gemini)
+  D) Manual captions are entered in the dashboard after the data pipeline completes
 Run: cd /app && python tests/test_core.py
 """
 import asyncio
@@ -274,25 +274,6 @@ h1{{font-family:'Space Grotesk';font-size:64px;margin-top:24px;font-weight:700}}
     return out
 
 
-# ---------- D: LLM captions with provider switching ----------
-async def gen_caption(provider: str, model: str, summary: MarketSummary, gainers: list[StockQuote]) -> str:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    key = os.environ["EMERGENT_LLM_KEY"]
-    chat = LlmChat(
-        api_key=key, session_id=f"poc-{provider}",
-        system_message="You write concise, engaging Instagram captions for Philippine stock market updates. Use ONLY the exact numbers provided. Never invent figures. Max 80 words, include 3 hashtags.",
-    ).with_model(provider, model)
-    g = ", ".join(f"{q.symbol} +{q.percent_change:.2f}%" for q in gainers[:3])
-    msg = UserMessage(text=(
-        f"Market date: {summary.market_date}. PSEi closed at {summary.psei_value:,.2f}, "
-        f"{summary.change_points:+,.2f} pts ({summary.change_percent:+.2f}%). "
-        f"Advancers {summary.advancers}, decliners {summary.decliners}, unchanged {summary.unchanged}. "
-        f"Top gainers: {g}. Write the caption."
-    ))
-    resp = await chat.send_message(msg)
-    return str(resp)
-
-
 async def main():
     ok = True
     async with httpx.AsyncClient(follow_redirects=True) as client:
@@ -355,16 +336,6 @@ async def main():
         RESULTS["C Playwright PNG render"] = f"PASS ({png}, {size//1024} KB)"
     except Exception as e:
         RESULTS["C Playwright PNG render"] = f"FAIL: {e}"; ok = False
-
-    # D LLM provider switching
-    for provider, model in [("openai", "gpt-5.4-mini"), ("gemini", "gemini-3-flash-preview")]:
-        try:
-            assert summary
-            cap = await gen_caption(provider, model, summary, gainers)
-            assert len(cap) > 30
-            RESULTS[f"D LLM caption [{provider}/{model}]"] = f"PASS ({cap[:90]!r}...)"
-        except Exception as e:
-            RESULTS[f"D LLM caption [{provider}/{model}]"] = f"FAIL: {e}"; ok = False
 
     print("\n" + "=" * 78)
     print("CORE POC RESULTS")

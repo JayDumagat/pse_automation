@@ -70,8 +70,6 @@ class DividendItem(BaseModel):
 
 
 class SettingsModel(BaseModel):
-    llm_provider: str = "openai"
-    llm_model: str = "gpt-4.1-mini"
     schedule_enabled: bool = False
     schedule_time: str = "17:00"
     timezone: str = "Asia/Manila"
@@ -86,7 +84,3 @@ PLATFORMS = ["instagram", "facebook", "linkedin", "x"]
 GRAPHIC_TYPES = ["market-summary", "movers", "sectors", "reits", "dividends"]
 
 STAGES = ["fetch", "validate", "compute", "store", "graphics", "captions", "qa", "ready"]
-
-AVAILABLE_MODELS = {
-    "openai": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-5-mini", "gpt-5.4-mini"],
-}

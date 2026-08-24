@@ -1,7 +1,7 @@
 """Daily pipeline orchestrator.
 Stages: fetch -> validate -> compute -> store -> graphics -> captions -> qa -> ready
-Critical stages (fetch/validate/compute/store) fail the run; graphics/captions failures
-degrade gracefully with warnings so the operator can regenerate.
+Critical stages (fetch/validate/compute/store) fail the run; graphics failures degrade
+gracefully with warnings. Captions are created as manual editable fields.
 """
 import asyncio
 import logging
@@ -13,7 +13,6 @@ import httpx
 
 import compute as compute_mod
 import graphics_templates
-import llm_service
 import renderer
 import sources
 from models import PLATFORMS, STAGES, SettingsModel
@@ -37,11 +36,6 @@ async def notify(db, severity: str, title: str, message: str, run_id: str | None
 async def get_settings(db) -> SettingsModel:
     doc = await db.settings.find_one({"_id": "singleton"}) or {}
     doc.pop("_id", None)
-    # The container uses the direct OpenAI SDK; migrate settings saved for the
-    # previous Emergent provider bridge instead of failing caption generation.
-    if doc.get("llm_provider") != "openai":
-        doc["llm_provider"] = "openai"
-        doc["llm_model"] = "gpt-4.1-mini"
     return SettingsModel(**doc)
 
 
@@ -91,6 +85,8 @@ async def run_pipeline(db, run_id: str):
         warnings: list[str] = []
         snapshot = None
         dividends: list[dict] = []
+        tradingview_metrics: dict[str, dict] = {}
+        board_lots: dict[str, int] = {}
         graphics_meta: list[dict] = []
         captions_docs: list[dict] = []
         try:
@@ -104,6 +100,35 @@ async def run_pipeline(db, run_id: str):
                 indices = overview["indices"]
                 index_source = overview["source"]
                 as_of = overview.get("as_of") or quote_as_of
+                psei_symbols = {
+                    compute_mod._normalise_symbol(symbol) for symbol in settings.psei_tickers
+                }
+                active_candidates = [
+                    q.symbol for q in sorted(
+                        (q for q in quotes if compute_mod._normalise_symbol(q.symbol) in psei_symbols and q.volume > 0),
+                        key=lambda q: -q.value_traded,
+                    )[:3]
+                ]
+                try:
+                    tradingview_metrics = await sources.fetch_tradingview_stock_metrics(
+                        client, list(dict.fromkeys([*settings.reit_tickers, *settings.divy_tickers])),
+                    )
+                except Exception as te:
+                    warnings.append(f"TradingView dividend metrics unavailable: {te}")
+                try:
+                    board_lots = await sources.fetch_board_lots(
+                        client, list(dict.fromkeys([*settings.reit_tickers, *settings.divy_tickers])),
+                    )
+                except Exception as be:
+                    warnings.append(f"PSE Edge Board Lot data unavailable: {be}")
+                try:
+                    trade_counts = await sources.fetch_investagram_trade_counts(active_candidates)
+                    for quote in quotes:
+                        symbol = compute_mod._normalise_symbol(quote.symbol)
+                        if symbol in trade_counts:
+                            quote.trades = trade_counts[symbol]
+                except Exception as ie:
+                    warnings.append(f"Investagrams trade counts unavailable: {ie}")
                 dividend_targets = list(dict.fromkeys(
                     [*settings.reit_tickers, *settings.divy_tickers]
                 ))
@@ -128,6 +153,9 @@ async def run_pipeline(db, run_id: str):
                 "quotes": len(quotes), "indices": len(indices),
                 "index_source": index_source, "dividends": len(dividends),
                 "market_as_of": as_of.isoformat(),
+                "tradingview_yields": sum(1 for x in tradingview_metrics.values() if x.get("yield_ttm") is not None),
+                "board_lots": len(board_lots),
+                "investagrams_trade_counts": sum(1 for q in quotes if q.trades is not None),
                 "official_market_stats": bool(overview.get("stats")),
             })
 
@@ -144,6 +172,7 @@ async def run_pipeline(db, run_id: str):
             snapshot = compute_mod.compute_snapshot(
                 quotes, indices, as_of, settings.reit_tickers, settings.divy_tickers,
                 settings.psei_tickers, overview.get("stats"), dividends,
+                tradingview_metrics=tradingview_metrics, board_lots=board_lots,
             )
             snapshot["market_data_source"] = overview["source"]
             snapshot["market_totals_source"] = "pse-edge" if overview.get("stats") else "derived"
@@ -179,21 +208,19 @@ async def run_pipeline(db, run_id: str):
                 warnings.append(f"Graphics generation failed: {ge}")
                 await _update_stage(db, run_id, "graphics", "failed", error=str(ge))
 
-            # ---- captions (non-critical) ----
+            # ---- captions (manual) ----
             await _update_stage(db, run_id, "captions", "running")
-            try:
-                caps = await llm_service.generate_captions(snapshot, settings.llm_provider, settings.llm_model)
-                for platform, text in caps.items():
-                    doc = {"id": str(uuid.uuid4()), "run_id": run_id, "platform": platform,
-                           "text": text, "provider": settings.llm_provider, "model": settings.llm_model,
-                           "edited": False, "updated_at": now_iso()}
-                    captions_docs.append(doc)
-                    await db.captions.insert_one(dict(doc))
-                await _update_stage(db, run_id, "captions", "success", meta={
-                    "provider": settings.llm_provider, "model": settings.llm_model})
-            except Exception as ce:
-                warnings.append(f"Caption generation failed: {ce}")
-                await _update_stage(db, run_id, "captions", "failed", error=str(ce))
+            for platform in PLATFORMS:
+                doc = {
+                    "id": str(uuid.uuid4()), "run_id": run_id, "platform": platform,
+                    "text": "", "provider": "manual", "model": "manual",
+                    "edited": False, "updated_at": now_iso(),
+                }
+                captions_docs.append(doc)
+                await db.captions.insert_one(dict(doc))
+            await _update_stage(db, run_id, "captions", "success", meta={
+                "mode": "manual", "platforms": len(captions_docs),
+            })
 
             # ---- qa ----
             await _update_stage(db, run_id, "qa", "running")
@@ -256,18 +283,4 @@ async def regenerate_graphics(db, run_id: str) -> int:
 
 
 async def regenerate_all_captions(db, run_id: str) -> int:
-    settings = await get_settings(db)
-    snap = await db.snapshots.find_one({"run_id": run_id}, {"_id": 0})
-    if not snap:
-        raise ValueError("No snapshot for this run")
-    caps = await llm_service.generate_captions(snap, settings.llm_provider, settings.llm_model)
-    await db.captions.delete_many({"run_id": run_id})
-    for platform, text in caps.items():
-        await db.captions.insert_one({
-            "id": str(uuid.uuid4()), "run_id": run_id, "platform": platform, "text": text,
-            "provider": settings.llm_provider, "model": settings.llm_model,
-            "edited": False, "updated_at": now_iso(),
-        })
-    await notify(db, "info", "Captions regenerated",
-                 f"All captions regenerated with {settings.llm_provider}/{settings.llm_model}.", run_id)
-    return len(caps)
+    raise ValueError("Automatic captions are disabled. Enter and save captions manually.")

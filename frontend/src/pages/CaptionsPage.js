@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Copy, MessageSquareText, RefreshCcw, Save } from "lucide-react";
+import { Check, Copy, MessageSquareText, Save } from "lucide-react";
 import { toast } from "sonner";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +13,6 @@ import { api, PLATFORM_LABELS, timeAgo } from "@/lib/api";
 const CaptionCard = ({ caption, runId, onUpdated }) => {
   const [text, setText] = useState(caption.text || "");
   const [saving, setSaving] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const dirty = text !== caption.text;
 
   useEffect(() => setText(caption.text || ""), [caption.text]);
@@ -40,19 +35,6 @@ const CaptionCard = ({ caption, runId, onUpdated }) => {
     toast.success("Copied to clipboard");
   };
 
-  const regenerate = async () => {
-    setRegenerating(true);
-    try {
-      const res = await api.post(`/runs/${runId}/captions/${caption.platform}/regenerate`);
-      onUpdated(res.data);
-      toast.success("Caption regenerated");
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Regeneration failed");
-    } finally {
-      setRegenerating(false);
-    }
-  };
-
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -62,8 +44,8 @@ const CaptionCard = ({ caption, runId, onUpdated }) => {
             {caption.edited && (
               <Badge variant="outline" className="border-sky-400/30 bg-sky-400/10 text-sky-300">edited</Badge>
             )}
-            <Badge data-testid={`caption-${caption.platform}-model-badge`} variant="outline" className="font-mono text-[11px] text-muted-foreground">
-              {caption.provider}/{caption.model}
+            <Badge data-testid={`caption-${caption.platform}-manual-badge`} variant="outline" className="font-mono text-[11px] text-muted-foreground">
+              Manual input
             </Badge>
           </span>
         </CardTitle>
@@ -75,7 +57,7 @@ const CaptionCard = ({ caption, runId, onUpdated }) => {
           onChange={(e) => setText(e.target.value)}
           rows={caption.platform === "x" ? 5 : 9}
           className="resize-y bg-secondary/40 font-sans text-sm leading-6"
-          placeholder="Write or regenerate a caption…"
+          placeholder="Write a caption…"
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className={`font-mono text-xs ${caption.platform === "x" && text.length > 280 ? "text-rose-400" : "text-muted-foreground"}`}>
@@ -85,28 +67,6 @@ const CaptionCard = ({ caption, runId, onUpdated }) => {
             <Button data-testid={`caption-${caption.platform}-copy-button`} variant="ghost" size="sm" onClick={copy}>
               <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
             </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button data-testid={`caption-${caption.platform}-regenerate-button`} variant="secondary" size="sm" disabled={regenerating}>
-                  <RefreshCcw className={`mr-1.5 h-3.5 w-3.5 ${regenerating ? "animate-spin" : ""}`} />
-                  {regenerating ? "Generating…" : "Regenerate"}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent className="border-border bg-popover">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Regenerate {PLATFORM_LABELS[caption.platform]} caption?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will overwrite the current caption {caption.edited ? "including your manual edits" : ""} using the configured LLM.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction data-testid={`caption-${caption.platform}-regenerate-confirm`} onClick={regenerate}>
-                    Regenerate
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
             <Button data-testid={`caption-${caption.platform}-save-button`} size="sm" onClick={save} disabled={!dirty || saving}>
               {dirty ? <Save className="mr-1.5 h-3.5 w-3.5" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
               {saving ? "Saving…" : dirty ? "Save" : "Saved"}
@@ -150,7 +110,7 @@ export default function CaptionsPage() {
       <EmptyState
         icon={MessageSquareText}
         title="No captions yet"
-        message={run?.status === "running" ? "Pipeline is running — captions will appear once generated." : "Run the pipeline to generate AI captions for all four platforms."}
+        message={run?.status === "running" ? "Pipeline is running — manual caption fields will appear when the run is ready." : "Run the pipeline to create manual caption fields for all four platforms."}
         actionLabel="Go to pipeline"
         onAction={() => navigate("/runs")}
         actionTestId="captions-goto-pipeline-button"
@@ -165,7 +125,7 @@ export default function CaptionsPage() {
     <div className="space-y-6">
       <div>
         <h2 className="font-display text-xl font-semibold">Platform captions</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Market date {run.market_date || "—"} · edit, copy, or regenerate per platform.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Market date {run.market_date || "—"} · write, edit, copy, and save each platform caption manually.</p>
       </div>
       <Tabs defaultValue="instagram">
         <TabsList>
