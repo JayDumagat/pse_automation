@@ -20,7 +20,7 @@ services:
       MONGO_URL: mongodb://mongo:27017
       DB_NAME: ${DB_NAME:-pse_daily_pulse}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:3000}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-emergent-bC905887eB2C025A0C}
     depends_on:
       mongo:
         condition: service_healthy
