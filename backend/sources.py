@@ -1,5 +1,6 @@
 """Market data sources — resilient fetchers with explicit source fallbacks."""
 import asyncio
+import json
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -20,11 +21,6 @@ PHISIX_URLS = [
 
 TV_INDEX_TICKERS = {
     "PSE:PSEI": "PSEi",
-    # PSE's thematic/index-series symbols.  The alternate TRI aliases allow
-    # the scanner to return the symbol currently published by TradingView.
-    "PSE:PSEITR": "PSEi Total Return",
-    "PSE:PSEI_TR": "PSEi Total Return",
-    "PSE:TRI": "PSEi Total Return",
     "PSE:ALL": "All Shares",
     "PSE:FIN": "Financials",
     "PSE:IND": "Industrial",
@@ -32,8 +28,6 @@ TV_INDEX_TICKERS = {
     "PSE:PRO": "Property",
     "PSE:SVC": "Services",
     "PSE:M_O": "Mining & Oil",
-    "PSE:DIVY": "PSE DivY",
-    "PSE:MID": "PSE MidCap",
 }
 
 YAHOO_TICKERS = {
@@ -45,6 +39,11 @@ YAHOO_TICKERS = {
 SECTOR_NAMES = ["Financials", "Industrial", "Holding Firms", "Property", "Services", "Mining & Oil"]
 
 PSE_INDEX_SUMMARY_URL = "https://edge.pse.com.ph/index/form.do"
+PSE_OFFICIAL_MARKET_URLS = [
+    "https://frames.pse.com.ph",
+    "https://www.pse.ph/iPse/web/pages/marketInformation.jsp",
+    "https://www.pse.com.ph/index-history/",
+]
 PSE_COMPANY_DIRECTORY_URL = "https://edge.pse.com.ph/companyDirectory/search.ax"
 PSE_STOCK_DATA_URL = "https://edge.pse.com.ph/companyPage/stockData.do"
 INVESTAGRAM_STOCK_URL = "https://www.investagrams.com/Stock/PSE:{symbol}"
@@ -139,6 +138,99 @@ def _parse_pse_index_summary(html: str) -> tuple[dict[str, IndexQuote], dict, da
     return indices, stats, as_of
 
 
+def _parse_official_thematic_indices(html: str) -> dict[str, IndexQuote]:
+    """Parse thematic/index-history values published by PSE's own pages."""
+    soup = BeautifulSoup(html, "html.parser")
+    out: dict[str, IndexQuote] = {}
+    labels = {
+        "psei total return": "PSEi Total Return",
+        "psei tri": "PSEi Total Return",
+        "pse divy": "PSE DivY",
+        "pse divy index": "PSE DivY",
+        "dividend yield index": "PSE DivY",
+        "pse midcap": "PSE MidCap",
+        "pse midcap index": "PSE MidCap",
+        "midcap index": "PSE MidCap",
+    }
+    for row in soup.find_all("tr"):
+        cells = [re.sub(r"\s+", " ", cell.get_text(" ", strip=True)) for cell in row.find_all(["th", "td"])]
+        if len(cells) < 2:
+            continue
+        name = labels.get(cells[0].lower().rstrip(":"))
+        value = _first_number(cells[1], signed=False)
+        if not name or value is None:
+            continue
+        change = _first_number(cells[2]) if len(cells) > 2 else None
+        percent = _first_number(cells[3]) if len(cells) > 3 else None
+        if change is None:
+            change = 0.0
+        if percent is None:
+            previous = value - change
+            percent = (change / previous * 100) if previous else 0.0
+        out[name] = IndexQuote(
+            symbol=name.upper().replace(" ", "_"), name=name,
+            value=round(value, 2), previous_close=round(value - change, 2),
+            change_points=round(change, 2), change_percent=round(percent, 2),
+        )
+    return out
+
+
+def _parse_pse_frames_indices(html: str) -> dict[str, IndexQuote]:
+    """Read index quotes from PSE's official embedded market JSON payload."""
+    element = BeautifulSoup(html, "html.parser").select_one("#JsonId")
+    if not element or not element.get("value"):
+        return {}
+    try:
+        payload = json.loads(element["value"])
+    except (TypeError, json.JSONDecodeError):
+        return {}
+
+    labels = {
+        "psei total return": "PSEi Total Return", "psei tri": "PSEi Total Return",
+        "pse divy": "PSE DivY", "pse divy index": "PSE DivY",
+        "dividend yield index": "PSE DivY", "pse midcap": "PSE MidCap",
+        "pse midcap index": "PSE MidCap", "midcap index": "PSE MidCap",
+    }
+    result: dict[str, IndexQuote] = {}
+
+    def visit(node):
+        if isinstance(node, dict):
+            strings = [str(value).strip() for value in node.values() if isinstance(value, str)]
+            name = next((labels.get(value.lower().rstrip(":")) for value in strings if value.lower().rstrip(":") in labels), None)
+            if name:
+                value = next((node[key] for key in ("value", "close", "last", "indexValue", "current", "price") if key in node), None)
+                try:
+                    value = float(str(value).replace(",", ""))
+                except (TypeError, ValueError):
+                    value = None
+                if value is not None:
+                    change = next((node[key] for key in ("change", "change_abs", "changePoints") if key in node), 0)
+                    percent = next((node[key] for key in ("percentChange", "changePercent", "percent") if key in node), None)
+                    try:
+                        change = float(str(change).replace(",", ""))
+                    except (TypeError, ValueError):
+                        change = 0.0
+                    try:
+                        percent = float(str(percent).replace(",", "")) if percent is not None else None
+                    except (TypeError, ValueError):
+                        percent = None
+                    previous = value - change
+                    result[name] = IndexQuote(
+                        symbol=name.upper().replace(" ", "_"), name=name,
+                        value=round(value, 2), previous_close=round(previous, 2),
+                        change_points=round(change, 2),
+                        change_percent=round(percent if percent is not None else ((change / previous * 100) if previous else 0), 2),
+                    )
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(payload)
+    return result
+
+
 async def fetch_quotes(client: httpx.AsyncClient) -> tuple[list[StockQuote], datetime]:
     """All PSE stock quotes via Phisix."""
     last_err = None
@@ -188,6 +280,18 @@ async def fetch_market_overview(client: httpx.AsyncClient) -> dict:
         response = await client.get(PSE_INDEX_SUMMARY_URL, timeout=30, headers={"User-Agent": UA})
         response.raise_for_status()
         indices, stats, as_of = _parse_pse_index_summary(response.text)
+        # PSE Edge's summary page does not include the thematic indices. Read
+        # the Exchange's own market/index pages for those values.
+        for url in PSE_OFFICIAL_MARKET_URLS:
+            try:
+                official = await client.get(url, timeout=30, headers={"User-Agent": UA})
+                official.raise_for_status()
+                parser = _parse_pse_frames_indices if "frames.pse.com.ph" in url else _parse_official_thematic_indices
+                for name, value in parser(official.text).items():
+                    if name not in indices:
+                        indices[name] = value
+            except Exception as e:
+                logger.warning("Official PSE thematic indices unavailable from %s: %s", url, e)
         return {"indices": indices, "stats": stats, "as_of": as_of, "source": "pse-edge"}
     except Exception as e:
         logger.warning(f"PSE Edge market summary failed, falling back to index feeds: {e}")

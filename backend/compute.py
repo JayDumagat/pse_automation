@@ -216,7 +216,21 @@ def compute_snapshot(
         unchanged=unchanged, total_quotes=total_quotes, total_volume=total_volume,
         total_trades=total_trades, value_turnover_source="pse-edge" if market_stats and "total value" in stats else "derived",
     ).model_dump()
-    index_board = [indices[n].model_dump() for n in INDEX_BOARD_ORDER if n in indices]
+    # Keep configured index rows visible even when the upstream feed does not
+    # publish a value for a thematic index on that trading day.  The frontend
+    # renders unavailable numeric fields as an em dash instead of hiding the
+    # requested index entirely.
+    index_board = []
+    for name in INDEX_BOARD_ORDER:
+        if name in indices:
+            index_board.append(indices[name].model_dump())
+        else:
+            index_board.append({
+                "symbol": name.upper().replace(" ", "_"), "name": name,
+                "value": None, "previous_close": None,
+                "change_points": None, "change_percent": None,
+                "day_high": None, "day_low": None, "data_status": "unavailable",
+            })
     sectors = [indices[n].model_dump() for n in SECTOR_BOARD_ORDER if n in indices]
     explanation = _explanation(summary, sectors, gainers, losers, actives)
     missing_psei = [t for t in psei_universe if t not in quote_map]
