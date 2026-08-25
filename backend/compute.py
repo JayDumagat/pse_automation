@@ -9,8 +9,12 @@ from models import (
 
 
 INDEX_BOARD_ORDER = [
-    "PSEi", "All Shares", "Financials", "Industrial", "Holding Firms",
-    "Property", "Services", "Mining & Oil",
+    "PSEi", "PSEi Total Return", "All Shares", "PSE DivY", "PSE MidCap",
+    "Financials", "Industrial", "Holding Firms", "Property", "Services", "Mining & Oil",
+]
+
+SECTOR_BOARD_ORDER = [
+    "Financials", "Industrial", "Holding Firms", "Property", "Services", "Mining & Oil",
 ]
 
 
@@ -87,6 +91,11 @@ def _quote_metric(
     dps = tv_dps if tv_dps is not None else dividend_totals.get(symbol)
     minimum = round(quote.price * lot, 2) if lot else None
     tv_yield = tv_metric.get("yield_ttm")
+    # TradingView's public dividends page always exposes the TTM yield, while
+    # its scanner may omit the matching DPS field. Reconstruct the TTM
+    # dividend/share from those two values rather than leaving the metric blank.
+    if dps is None and tv_yield is not None and quote.price > 0:
+        dps = round(quote.price * float(tv_yield) / 100, 8)
     if tv_yield is not None:
         yield_ttm = round(float(tv_yield), 2)
         yield_source = "tradingview"
@@ -208,7 +217,7 @@ def compute_snapshot(
         total_trades=total_trades, value_turnover_source="pse-edge" if market_stats and "total value" in stats else "derived",
     ).model_dump()
     index_board = [indices[n].model_dump() for n in INDEX_BOARD_ORDER if n in indices]
-    sectors = [indices[n].model_dump() for n in INDEX_BOARD_ORDER[2:] if n in indices]
+    sectors = [indices[n].model_dump() for n in SECTOR_BOARD_ORDER if n in indices]
     explanation = _explanation(summary, sectors, gainers, losers, actives)
     missing_psei = [t for t in psei_universe if t not in quote_map]
     return {

@@ -20,6 +20,11 @@ PHISIX_URLS = [
 
 TV_INDEX_TICKERS = {
     "PSE:PSEI": "PSEi",
+    # PSE's thematic/index-series symbols.  The alternate TRI aliases allow
+    # the scanner to return the symbol currently published by TradingView.
+    "PSE:PSEITR": "PSEi Total Return",
+    "PSE:PSEI_TR": "PSEi Total Return",
+    "PSE:TRI": "PSEi Total Return",
     "PSE:ALL": "All Shares",
     "PSE:FIN": "Financials",
     "PSE:IND": "Industrial",
@@ -27,6 +32,8 @@ TV_INDEX_TICKERS = {
     "PSE:PRO": "Property",
     "PSE:SVC": "Services",
     "PSE:M_O": "Mining & Oil",
+    "PSE:DIVY": "PSE DivY",
+    "PSE:MID": "PSE MidCap",
 }
 
 YAHOO_TICKERS = {
@@ -38,11 +45,17 @@ YAHOO_TICKERS = {
 SECTOR_NAMES = ["Financials", "Industrial", "Holding Firms", "Property", "Services", "Mining & Oil"]
 
 PSE_INDEX_SUMMARY_URL = "https://edge.pse.com.ph/index/form.do"
-PSE_COMPANY_DIRECTORY_URL = "https://edge.pse.com.ph/companyDirectory/form.do"
+PSE_COMPANY_DIRECTORY_URL = "https://edge.pse.com.ph/companyDirectory/search.ax"
 PSE_STOCK_DATA_URL = "https://edge.pse.com.ph/companyPage/stockData.do"
 INVESTAGRAM_STOCK_URL = "https://www.investagrams.com/Stock/PSE:{symbol}"
+TRADINGVIEW_DIVIDENDS_URL = "https://www.tradingview.com/symbols/PSE-{symbol}/financials-dividends/"
 PSE_INDEX_NAMES = {
     "psei": "PSEi",
+    "psei total return": "PSEi Total Return",
+    "psei total return index": "PSEi Total Return",
+    "psei tri": "PSEi Total Return",
+    "pseitri": "PSEi Total Return",
+    "pse tri": "PSEi Total Return",
     "all shares": "All Shares",
     "financials": "Financials",
     "industrial": "Industrial",
@@ -51,6 +64,14 @@ PSE_INDEX_NAMES = {
     "services": "Services",
     "mining and oil": "Mining & Oil",
     "mining & oil": "Mining & Oil",
+    "divy": "PSE DivY",
+    "pse divy": "PSE DivY",
+    "pse divy index": "PSE DivY",
+    "dividend yield": "PSE DivY",
+    "pse midcap": "PSE MidCap",
+    "pse midcap index": "PSE MidCap",
+    "midcap": "PSE MidCap",
+    "mid cap": "PSE MidCap",
 }
 
 
@@ -243,6 +264,30 @@ async def fetch_tradingview_stock_metrics(
             "dividend_per_share_ttm": round(float(dps), 8) if dps is not None else None,
             "yield_source": "tradingview" if yield_value is not None else None,
         }
+
+    # The public dividends page is the canonical presentation of the TTM
+    # figure.  Read it for every target so a generic scanner yield cannot
+    # silently replace the value shown on the linked source page.  Scanner
+    # values remain a fallback when a symbol page is unavailable.
+    async def fetch_page(symbol: str):
+        try:
+            page = await client.get(
+                TRADINGVIEW_DIVIDENDS_URL.format(symbol=symbol),
+                timeout=25,
+                headers={"User-Agent": UA},
+            )
+            page.raise_for_status()
+            text = BeautifulSoup(page.text, "html.parser").get_text(" ", strip=True)
+            match = re.search(r"dividend\s+yield\s*\(TTM\)%\s+is\s+([\d,.]+)%", text, re.I)
+            if not match:
+                return
+            current = metrics.setdefault(symbol, {})
+            current["yield_ttm"] = round(float(match.group(1).replace(",", "")), 4)
+            current["yield_source"] = "tradingview"
+        except Exception as e:
+            logger.warning("TradingView dividend page failed for %s: %s", symbol, e)
+
+    await asyncio.gather(*(fetch_page(symbol) for symbol in targets))
     return metrics
 
 
@@ -250,17 +295,39 @@ def _parse_pse_company_ids(html: str, target_symbols: set[str]) -> dict[str, tup
     """Map PSE symbols to company/security IDs from the public directory."""
     soup = BeautifulSoup(html, "html.parser")
     found: dict[str, tuple[str, str]] = {}
-    for anchor in soup.select("a[onclick]"):
+    # In the current directory markup the company name and ticker are sibling
+    # cells, while the cmDetail(...) handler is attached to the company-name
+    # link.  Parse the whole row so the two pieces are associated correctly.
+    for row in soup.find_all("tr"):
+        cells = [re.sub(r"\s+", " ", cell.get_text(" ", strip=True)) for cell in row.find_all(["th", "td"])]
+        symbol = next((_normalise_symbol(cell) for cell in cells if _normalise_symbol(cell) in target_symbols), "")
+        if not symbol or symbol in found:
+            continue
+        link_data = " ".join(
+            " ".join((anchor.get("onclick", ""), anchor.get("href", "")))
+            for anchor in row.select("a[onclick], a[href]")
+        )
+        match = re.search(r"cmDetail\(\s*['\"]?(\d+)['\"]?\s*(?:,\s*['\"]?(\d+)['\"]?)?\s*\)", link_data, re.I)
+        if not match:
+            cmpy = re.search(r"(?:cmpy_id|company_id)[=/'\"]+\s*(\d+)", link_data, re.I)
+            match = re.match(r"(\d+)$", cmpy.group(1)) if cmpy else None
+        if match:
+            found[symbol] = (match.group(1), match.group(2) if match.lastindex and match.lastindex >= 2 and match.group(2) else "")
+
+    # Keep support for older responses where the ticker itself was the link.
+    for anchor in soup.select("a[onclick], a[href]"):
         symbol = _normalise_symbol(anchor.get_text(" ", strip=True))
         if symbol not in target_symbols or symbol in found:
             continue
-        match = re.search(
-            r"cmDetail\(\s*['\"](\d+)['\"]\s*,\s*['\"](\d+)['\"]\s*\)",
-            anchor.get("onclick", ""),
-            re.I,
-        )
+        link_data = " ".join((anchor.get("onclick", ""), anchor.get("href", "")))
+        # PSE has used both cmDetail(cmpy_id, security_id) and direct links
+        # with only cmpy_id over time.  The stock-data page accepts the latter.
+        match = re.search(r"cmDetail\(\s*['\"]?(\d+)['\"]?\s*(?:,\s*['\"]?(\d+)['\"]?)?\s*\)", link_data, re.I)
+        if not match:
+            cmpy = re.search(r"(?:cmpy_id|company_id)[=/'\"]+\s*(\d+)", link_data, re.I)
+            match = re.match(r"(\d+)$", cmpy.group(1)) if cmpy else None
         if match:
-            found[symbol] = (match.group(1), match.group(2))
+            found[symbol] = (match.group(1), match.group(2) if match.lastindex and match.lastindex >= 2 and match.group(2) else "")
     return found
 
 
@@ -269,13 +336,16 @@ async def fetch_board_lots(client: httpx.AsyncClient, symbols: list[str]) -> dic
     targets = {_normalise_symbol(symbol) for symbol in symbols if _normalise_symbol(symbol)}
     if not targets:
         return {}
-    directory = await client.get(
-        PSE_COMPANY_DIRECTORY_URL,
-        timeout=30,
-        headers={"User-Agent": UA},
-    )
-    directory.raise_for_status()
-    company_ids = _parse_pse_company_ids(directory.text, targets)
+    # search.ax is paginated (the form.do shell contains no company rows).
+    pages = await asyncio.gather(*(
+        client.get(PSE_COMPANY_DIRECTORY_URL, params={"pageNo": page}, timeout=30, headers={"User-Agent": UA})
+        for page in range(1, 7)
+    ))
+    for page in pages:
+        page.raise_for_status()
+    company_ids: dict[str, tuple[str, str]] = {}
+    for page in pages:
+        company_ids.update(_parse_pse_company_ids(page.text, targets - set(company_ids)))
     if not company_ids:
         raise ValueError("PSE Edge company directory did not contain the requested tickers")
 
@@ -287,7 +357,7 @@ async def fetch_board_lots(client: httpx.AsyncClient, symbols: list[str]) -> dic
             try:
                 response = await client.get(
                     PSE_STOCK_DATA_URL,
-                    params={"cmpy_id": ids[0], "security_id": ids[1]},
+                    params={"cmpy_id": ids[0], **({"security_id": ids[1]} if ids[1] else {})},
                     timeout=25,
                     headers={"User-Agent": UA, "Referer": PSE_COMPANY_DIRECTORY_URL},
                 )
@@ -297,8 +367,8 @@ async def fetch_board_lots(client: httpx.AsyncClient, symbols: list[str]) -> dic
                     cells = row.find_all(["th", "td"])
                     if len(cells) < 2:
                         continue
-                    label = cells[0].get_text(" ", strip=True).lower()
-                    if label != "board lot":
+                    label = re.sub(r"\s+", " ", cells[0].get_text(" ", strip=True)).strip().lower().rstrip(":")
+                    if label not in {"board lot", "board lot (shares)"}:
                         continue
                     match = re.search(r"\d[\d,]*", cells[1].get_text(" ", strip=True))
                     if match:

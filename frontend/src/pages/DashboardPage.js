@@ -84,8 +84,9 @@ const IncomeTable = ({ rows, kind, testId }) => (
         <TableRow className="hover:bg-transparent">
           <TableHead>Ticker</TableHead>
           <TableHead className="text-right">Price</TableHead>
+          <TableHead className="text-right">Board lot</TableHead>
           <TableHead className="text-right">Chg %</TableHead>
-          <TableHead className="text-right">{kind === "reit" ? "Value turnover" : "Div/share TTM"}</TableHead>
+          <TableHead className="text-right">Div/share TTM</TableHead>
           <TableHead className="text-right">Yield TTM</TableHead>
           <TableHead className="text-right">Min investment</TableHead>
         </TableRow>
@@ -95,10 +96,9 @@ const IncomeTable = ({ rows, kind, testId }) => (
           <TableRow key={item.ticker} className="hover:bg-accent/40">
             <TableCell className="font-mono font-semibold">{item.ticker}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{item.price === null || item.price === undefined ? "—" : `₱${fmtNum(item.price)}`}</TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{item.board_lot === null || item.board_lot === undefined ? "—" : fmtNum(item.board_lot, 0)}</TableCell>
             <TableCell className="text-right"><Delta value={item.percent_change} /></TableCell>
-            <TableCell className="text-right font-mono tabular-nums">
-              {kind === "reit" ? pesoShort(item.value_turnover) : (item.dividend_per_share_ttm === null || item.dividend_per_share_ttm === undefined ? "—" : `₱${fmtNum(item.dividend_per_share_ttm, 4)}`)}
-            </TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{item.dividend_per_share_ttm === null || item.dividend_per_share_ttm === undefined ? "—" : `₱${fmtNum(item.dividend_per_share_ttm, 4)}`}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{item.yield_ttm === null || item.yield_ttm === undefined ? "—" : `${fmtNum(item.yield_ttm)}%`}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{item.minimum_investment === null || item.minimum_investment === undefined ? "—" : `₱${fmtNum(item.minimum_investment)}`}</TableCell>
           </TableRow>
