@@ -1,207 +1,172 @@
-"""Version-controlled HTML/CSS templates for the 5 social graphics (1080x1350).
-Validated JSON in -> HTML out -> Playwright screenshot -> PNG.
-"""
-from datetime import date, datetime
+"""Three-slide cinematic PSE Market Wrap templates."""
+import base64
+from datetime import datetime
+from html import escape
+from pathlib import Path
 
-GAIN = "#2EE59D"
-LOSS = "#FF5C6C"
-MUTED = "#8b9bbd"
-FAINT = "#5b6a8a"
+GAIN = "#55e6b1"
+LOSS = "#ff6b72"
 
 BASE_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
-*{margin:0;padding:0;box-sizing:border-box}
-body{width:1080px;height:1350px;background:#0a0f1e;color:#f8fafc;font-family:'Inter',sans-serif;padding:64px;display:flex;flex-direction:column;position:relative;overflow:hidden}
-body::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 900px 500px at 85% -10%, rgba(46,110,229,0.14), transparent),radial-gradient(ellipse 700px 400px at -10% 110%, rgba(46,229,157,0.06), transparent);pointer-events:none}
-.brand{font-family:'Space Grotesk';font-size:26px;letter-spacing:5px;color:#8b9bbd;text-transform:uppercase;font-weight:500}
-h1{font-family:'Space Grotesk';font-size:58px;margin-top:18px;font-weight:700;letter-spacing:-1px}
-.date{color:#5b6a8a;font-size:26px;margin-top:8px;font-weight:500}
-.card{background:linear-gradient(135deg,#111a33,#0d1428);border:1px solid #1e2a47;border-radius:22px}
-.foot{margin-top:auto;color:#44536f;font-size:20px;display:flex;justify-content:space-between;align-items:center;padding-top:24px}
-.pill{background:#111a33;border:1px solid #1e2a47;border-radius:999px;padding:8px 20px;font-size:20px;color:#8b9bbd}
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}html,body{width:1080px;height:1350px;overflow:hidden}
+body{background:#090b10;color:#f5f0e8;font-family:Manrope,Arial,sans-serif;position:relative}
+.wrap{height:100%;padding:62px 68px 58px;position:relative;display:flex;flex-direction:column;overflow:hidden}
+.kicker{font:500 18px/1 DM Mono,monospace;letter-spacing:3px;text-transform:uppercase;color:#b4b7bd;position:relative;z-index:4}
+.date{font:400 17px/1 DM Mono,monospace;color:#8b8f98;margin-top:12px;position:relative;z-index:4}
+.headline{font-size:68px;line-height:.98;letter-spacing:-3px;font-weight:800;max-width:880px;position:relative;z-index:4}
+.subhead{font-size:22px;line-height:1.35;color:#c8c7c2;max-width:730px;position:relative;z-index:4}
+.mono{font-family:'DM Mono',monospace}.rule{height:1px;background:rgba(245,240,232,.25);position:relative;z-index:4}
+.hero{position:absolute;inset:0;overflow:hidden;background:#0a0d13}.hero:after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,7,10,.06),rgba(5,7,10,.12) 34%,#090b10 86%)}
+.grid{position:absolute;inset:-20%;background:linear-gradient(115deg,transparent 48%,rgba(85,230,177,.13) 48.2%,transparent 48.6%),linear-gradient(25deg,transparent 65%,rgba(245,240,232,.09) 65.2%,transparent 65.5%);transform:perspective(500px) rotateX(52deg) rotateZ(-12deg);opacity:.55}
+.orb{position:absolute;border-radius:50%;filter:blur(2px);mix-blend-mode:screen}.coin{position:absolute;border:2px solid rgba(245,240,232,.35);border-radius:50%;display:flex;align-items:center;justify-content:center;color:rgba(245,240,232,.35);font:500 96px DM Mono,monospace;transform:rotate(-18deg);box-shadow:0 0 80px rgba(85,230,177,.12),inset 0 0 50px rgba(245,240,232,.08)}
+.stat{position:relative;z-index:4}.value{font-size:116px;line-height:.9;letter-spacing:-6px;font-weight:800}.change{font-size:38px;font-weight:700;margin-top:16px}.label{font:500 16px DM Mono,monospace;letter-spacing:2px;text-transform:uppercase;color:#a5a8af}
+.bottom{margin-top:auto;position:relative;z-index:4}.footer{display:flex;justify-content:space-between;align-items:end;font:400 14px DM Mono,monospace;color:#7e828a;margin-top:28px}
+.driver{display:grid;grid-template-columns:1fr auto;gap:12px 26px;position:relative;z-index:4;font-size:25px}.driver span:nth-child(2n){font-family:DM Mono,monospace;text-align:right}.positive{color:#55e6b1}.negative{color:#ff6b72}
+.watch-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;position:relative;z-index:4}.watch{border-top:1px solid rgba(245,240,232,.35);padding-top:16px}.watch-title{font-size:22px;font-weight:700}.watch-copy{font-size:17px;color:#aeb0b5;line-height:1.4;margin-top:7px}
 """
 
 
-def _fmt_date(iso: str) -> str:
+def _date(value: str) -> str:
     try:
-        return datetime.fromisoformat(iso).strftime("%A, %B %d, %Y")
+        return datetime.fromisoformat(value).strftime("%d %b %Y").upper()
     except Exception:
-        return iso
+        return str(value).upper()
 
 
-def _peso_short(v: float) -> str:
-    if v >= 1e9:
-        return f"\u20b1{v/1e9:.2f}B"
-    if v >= 1e6:
-        return f"\u20b1{v/1e6:.1f}M"
-    return f"\u20b1{v:,.0f}"
+def _short_money(value: float | None) -> str:
+    if value is None:
+        return "—"
+    if value >= 1e9:
+        return f"₱{value / 1e9:.2f}B"
+    if value >= 1e6:
+        return f"₱{value / 1e6:.1f}M"
+    return f"₱{value:,.0f}"
 
 
-def _shell(title: str, subtitle: str, body: str, brand: str = "PSE Daily Pulse", footer_note: str = "Data: PSE Edge \u00b7 quote feed fallbacks") -> str:
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>{BASE_CSS}</style></head><body>
-<div class="brand">{brand}</div>
-<h1>{title}</h1>
-<div class="date">{subtitle}</div>
-{body}
-<div class="foot"><span>{footer_note}</span><span>Not financial advice</span></div>
-</body></html>"""
+def _asset_uri(path: str | Path | None) -> str | None:
+    if not path or not Path(path).is_file():
+        return None
+    file_path = Path(path)
+    mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}.get(file_path.suffix.lower())
+    if not mime:
+        return None
+    return f"data:{mime};base64,{base64.b64encode(file_path.read_bytes()).decode('ascii')}"
 
 
-def market_summary_html(snapshot: dict, brand: str) -> str:
+def _shell(content: str, theme: str, background: str | Path | None = None) -> str:
+    uri = _asset_uri(background)
+    photo = f"background-image:url('{uri}');background-size:cover;background-position:center" if uri else ""
+    return f"<!doctype html><html><head><meta charset='utf-8'><style>{BASE_CSS}</style></head><body><div class='hero {theme}' style=\"{photo}\"></div>{content}</body></html>"
+
+
+def _header(snapshot: dict, brand: str) -> str:
+    return (f"<div class='wrap'><div class='kicker'>{escape(brand)} · PSE MARKET WRAP</div>"
+            f"<div class='date'>{_date(snapshot['summary']['market_date'])}</div>"
+            f"<div class='rule' style='margin-top:24px'></div>")
+
+
+def _footer() -> str:
+    return "<div class='footer'><span>PSE DATA · DAILY CLOSE</span><span>NOT FINANCIAL ADVICE</span></div></div>"
+
+
+def _story_headline(snapshot: dict) -> str:
+    s = snapshot["summary"]
+    sectors = [x for x in snapshot.get("sectors", []) if x.get("change_percent") is not None]
+    strongest = max(sectors, key=lambda x: x["change_percent"], default=None)
+    weakest = min(sectors, key=lambda x: x["change_percent"], default=None)
+    if s["change_percent"] > 0 and s["advancers"] >= s["decliners"]:
+        return "PHILIPPINE STOCKS EXTEND THE RALLY"
+    if s["change_percent"] < 0 and s["decliners"] > s["advancers"]:
+        return f"{weakest['name'].upper()} LEADS THE RETREAT" if weakest and weakest["change_percent"] < 0 else "PSEI SLIPS AS SELLING BROADENS"
+    if strongest and weakest and strongest["change_percent"] > 0:
+        return f"{strongest['name'].upper()} CUSHIONS A MIXED SESSION"
+    return "PSEI HOLDS THE MARKET'S ATTENTION"
+
+
+def _backgrounds() -> dict[str, Path | None]:
+    root = Path(__file__).resolve().parent / "storage" / "assets"
+    return {
+        key: next((root / f"background-{number}.{ext}" for ext in ("jpg", "jpeg", "png", "webp") if (root / f"background-{number}.{ext}").is_file()), None)
+        for key, number in (("big-move", 1), ("market-drivers", 2), ("whats-next", 3))
+    }
+
+
+def _supporting_stats(snapshot: dict) -> str:
+    s = snapshot["summary"]
+    values = []
+    all_shares = snapshot.get("indices", {}).get("All Shares", {})
+    if all_shares.get("change_percent") is not None:
+        values.append(("ALL SHARES", f"{all_shares['change_percent']:+.2f}%"))
+    values.extend([
+        ("BREADTH", f"{s['advancers']} / {s['decliners']} / {s['unchanged']}"),
+        ("VALUE TURNOVER", _short_money(s.get("value_turnover", s.get("approx_value_turnover")))),
+    ])
+    if s.get("total_volume"):
+        values.append(("TOTAL VOLUME", f"{s['total_volume']:,}"))
+    if s.get("total_trades") is not None:
+        values.append(("TRADES", f"{s['total_trades']:,}"))
+    return "<div style='display:flex;flex-wrap:wrap;gap:26px 45px;margin-top:30px'>" + "".join(
+        f"<div><div class='label'>{label}</div><div class='mono' style='font-size:30px;margin-top:8px'>{value}</div></div>"
+        for label, value in values[:5]
+    ) + "</div>"
+
+
+def big_move_html(snapshot: dict, brand: str, background: str | Path | None = None) -> str:
     s = snapshot["summary"]
     up = s["change_percent"] >= 0
     color = GAIN if up else LOSS
-    arrow = "\u25b2" if up else "\u25bc"
-    gainers = snapshot["gainers"][:3]
-    losers = snapshot["losers"][:3]
-
-    def mini_rows(rows, positive):
-        out = ""
-        for q in rows:
-            c = GAIN if positive else LOSS
-            sign = "+" if positive else ""
-            out += (f'<div style="display:flex;justify-content:space-between;padding:14px 20px;background:#0d1630;'
-                    f'border-radius:12px;margin-bottom:8px;font-size:26px;border:1px solid #16203c">'
-                    f'<span style="font-weight:800">{q["symbol"]}</span>'
-                    f'<span style="color:{c};font-weight:700">{sign}{q["percent_change"]:.2f}%</span></div>')
-        return out or '<div style="color:#5b6a8a;font-size:24px;padding:14px 20px">None today</div>'
-
-    body = f"""
-<div class="card" style="margin-top:44px;padding:42px 48px">
-  <div style="color:#5b6a8a;font-size:28px;font-weight:600;letter-spacing:2px">PSEi CLOSE</div>
-  <div style="font-size:104px;font-weight:800;letter-spacing:-3px;font-family:'Space Grotesk'">{s['psei_value']:,.2f}</div>
-  <div style="font-size:42px;font-weight:700;color:{color};margin-top:4px">{arrow} {s['change_points']:+,.2f} ({s['change_percent']:+.2f}%)</div>
-</div>
-<div style="display:flex;gap:20px;margin-top:24px">
-  <div class="card" style="flex:1;padding:24px 28px"><div style="font-size:42px;font-weight:800;color:{GAIN}">{s['advancers']}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Advancers</div></div>
-  <div class="card" style="flex:1;padding:24px 28px"><div style="font-size:42px;font-weight:800;color:{LOSS}">{s['decliners']}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Decliners</div></div>
-  <div class="card" style="flex:1;padding:24px 28px"><div style="font-size:42px;font-weight:800;color:#8b9bbd">{s['unchanged']}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Unchanged</div></div>
-  <div class="card" style="flex:1.4;padding:24px 28px"><div style="font-size:42px;font-weight:800">{_peso_short(s.get('value_turnover', s['approx_value_turnover']))}</div><div style="color:#8b9bbd;font-size:22px;margin-top:4px">Value turnover</div></div>
-</div>
-<div style="display:flex;gap:24px;margin-top:32px">
-  <div style="flex:1"><div style="font-family:'Space Grotesk';font-size:26px;color:{GAIN};letter-spacing:2px;margin-bottom:14px">TOP GAINERS</div>{mini_rows(gainers, True)}</div>
-  <div style="flex:1"><div style="font-family:'Space Grotesk';font-size:26px;color:{LOSS};letter-spacing:2px;margin-bottom:14px">TOP LOSERS</div>{mini_rows(losers, False)}</div>
-</div>"""
-    return _shell("Market Summary", _fmt_date(s["market_date"]), body, brand)
+    verb = "rose" if up else "fell"
+    takeaway = f"The benchmark {verb} as {s['advancers']} names advanced against {s['decliners']} decliners."
+    content = _header(snapshot, brand) + f"""
+<div class='grid'></div><div class='orb' style='width:620px;height:620px;right:-170px;top:170px;background:radial-gradient(circle at 35% 35%,rgba(85,230,177,.42),rgba(23,90,87,.12) 35%,transparent 70%)'></div><div class='coin' style='width:520px;height:520px;right:-72px;top:202px'>₱</div>
+<div style='margin-top:105px;position:relative;z-index:4'><div class='label'>THE BIG MOVE</div><div class='headline' style='margin-top:16px'>{escape(_story_headline(snapshot))}</div><div class='subhead' style='margin-top:24px'>{escape(takeaway)}</div></div>
+<div class='bottom'><div class='stat'><div class='label'>PSEI CLOSE</div><div class='value'>{s['psei_value']:,.2f}</div><div class='change' style='color:{color}'>{s['change_percent']:+.2f}% <span class='mono' style='font-size:22px;color:#b4b7bd'>/ {s['change_points']:+,.2f} pts</span></div></div><div class='subhead' style='margin-top:30px;max-width:610px'>{escape(s.get('explanation',''))}</div>{_footer()}"""
+    return _shell(content.replace("</div><div class='subhead' style='margin-top:30px", _supporting_stats(snapshot) + "<div class='subhead' style='margin-top:30px"), "hero-move", background)
 
 
-def movers_html(snapshot: dict, brand: str) -> str:
+def market_drivers_html(snapshot: dict, brand: str, background: str | Path | None = None) -> str:
     s = snapshot["summary"]
-
-    def block(title, rows, mode):
-        out = f'<div style="font-family:\'Space Grotesk\';font-size:26px;letter-spacing:2px;margin:26px 0 12px;color:#8b9bbd">{title}</div>'
-        for i, q in enumerate(rows[:5]):
-            if mode == "active":
-                trades = f'{q["trades"]:,} trades' if q.get("trades") is not None else "trades —"
-                right = f'<span style="font-weight:700;color:#c7d3ec">{_peso_short(q["value_traded"])} · {trades}</span>'
-            else:
-                c = GAIN if q["percent_change"] >= 0 else LOSS
-                right = f'<span style="font-weight:800;color:{c}">{q["percent_change"]:+.2f}%</span>'
-            out += (f'<div style="display:flex;align-items:center;gap:18px;padding:13px 22px;background:#0d1630;'
-                    f'border:1px solid #16203c;border-radius:12px;margin-bottom:7px;font-size:27px">'
-                    f'<span style="color:#44536f;font-weight:700;width:34px">{i+1}</span>'
-                    f'<span style="font-weight:800;flex:1">{q["symbol"]}</span>'
-                    f'<span style="color:#8b9bbd">\u20b1{q["price"]:,.2f}</span>{right}</div>')
-        return out
-
-    body = ('<div style="margin-top:8px">'
-            + block("TOP GAINERS", snapshot["gainers"], "gain")
-            + block("TOP LOSERS", snapshot["losers"], "loss")
-            + block("MOST ACTIVE BY VALUE", snapshot["actives"], "active")
-            + "</div>")
-    return _shell("Top Movers", _fmt_date(s["market_date"]), body, brand)
-
-
-def sectors_html(snapshot: dict, brand: str) -> str:
-    s = snapshot["summary"]
-    sectors = snapshot["sectors"]
-    max_abs = max((abs(x["change_percent"]) for x in sectors), default=1) or 1
-    rows = ""
-    for sec in sectors:
-        up = sec["change_percent"] >= 0
-        c = GAIN if up else LOSS
-        w = max(6, int(abs(sec["change_percent"]) / max_abs * 100))
-        rows += f"""
-<div class="card" style="padding:26px 32px;margin-bottom:16px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline">
-    <span style="font-size:32px;font-weight:700">{sec['name']}</span>
-    <span style="font-size:32px;font-weight:800;color:{c}">{sec['change_percent']:+.2f}%</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;color:#5b6a8a;font-size:23px;margin-top:6px">
-    <span>{sec['value']:,.2f}</span><span>{sec['change_points']:+,.2f} pts</span>
-  </div>
-  <div style="height:10px;background:#0d1630;border-radius:6px;margin-top:14px;overflow:hidden">
-    <div style="height:100%;width:{w}%;background:{c};border-radius:6px"></div>
-  </div>
-</div>"""
-    psei = snapshot["indices"]["PSEi"]
-    up = psei["change_percent"] >= 0
-    body = f"""
-<div style="margin-top:30px;display:flex;gap:16px;margin-bottom:26px">
-  <span class="pill">PSEi {psei['value']:,.2f} <b style="color:{GAIN if up else LOSS}">{psei['change_percent']:+.2f}%</b></span>
-  <span class="pill">Breadth {s['advancers']}\u25b2 / {s['decliners']}\u25bc</span>
-</div>
-{rows}"""
-    return _shell("Sector Performance", _fmt_date(s["market_date"]), body, brand)
+    sectors = [x for x in snapshot.get("sectors", []) if x.get("change_percent") is not None]
+    strongest = max(sectors, key=lambda x: x["change_percent"], default=None)
+    weakest = min(sectors, key=lambda x: x["change_percent"], default=None)
+    gain = (snapshot.get("gainers") or [{}])[0]
+    loss = (snapshot.get("losers") or [{}])[0]
+    pairs = [("LEADING SECTOR", f"{strongest['name']}  {strongest['change_percent']:+.2f}%" if strongest else "Unavailable", "positive" if strongest and strongest["change_percent"] >= 0 else "negative"), ("WEAKEST SECTOR", f"{weakest['name']}  {weakest['change_percent']:+.2f}%" if weakest else "Unavailable", "negative" if weakest and weakest["change_percent"] < 0 else "positive"), ("TOP GAINER", f"{gain.get('symbol','—')}  {gain.get('percent_change',0):+.2f}%", "positive"), ("TOP LOSER", f"{loss.get('symbol','—')}  {loss.get('percent_change',0):+.2f}%", "negative")]
+    pairs = []
+    for label, movers, css in (("MARKET LEADERS", snapshot.get("gainers", [])[:3], "positive"), ("UNDER PRESSURE", snapshot.get("losers", [])[:3], "negative")):
+        for mover in movers:
+            if mover.get("percent_change") is not None:
+                pairs.append((label, f"{mover.get('symbol', '')}  {mover['percent_change']:+.2f}%", css))
+                label = ""
+    for sector in sectors[:6]:
+        pairs.append((sector.get("name", "SECTOR"), f"{sector['change_percent']:+.2f}%", "positive" if sector["change_percent"] >= 0 else "negative"))
+    for active_row in (snapshot.get("actives") or [])[:3]:
+        if active_row.get("value_traded") is not None:
+            pairs.append((f"ACTIVE {active_row.get('symbol', '')}", f"{_short_money(active_row['value_traded'])}  {active_row.get('percent_change', 0):+.2f}%", "positive" if active_row.get("percent_change", 0) >= 0 else "negative"))
+    rows = "".join(f"<span class='label'>{a}</span><span class='{c}'>{escape(b)}</span>" for a,b,c in pairs)
+    content = _header(snapshot, brand) + f"""
+<div class='orb' style='width:780px;height:780px;left:-300px;top:210px;background:radial-gradient(circle,rgba(255,107,114,.34),rgba(93,37,50,.1) 43%,transparent 70%)'></div><div class='grid' style='opacity:.3'></div>
+<div style='margin-top:82px;position:relative;z-index:4'><div class='headline'>WHAT MOVED<br>THE MARKET</div><div class='subhead' style='margin-top:22px'>A session shaped by breadth, sector rotation and the names that pulled attention.</div></div>
+<div class='bottom'><div class='driver'>{rows}</div><div class='rule' style='margin-top:34px'></div><div style='display:flex;gap:55px;margin-top:24px;position:relative;z-index:4'><div><div class='label'>BREADTH</div><div class='mono' style='font-size:30px;margin-top:8px'>{s['advancers']} ↑  /  {s['decliners']} ↓</div></div><div><div class='label'>VALUE TURNOVER</div><div class='mono' style='font-size:30px;margin-top:8px'>{_short_money(s.get('value_turnover', s.get('approx_value_turnover')))}</div></div></div>{_footer()}"""
+    return _shell(content, "hero-drivers", background)
 
 
-def reits_html(snapshot: dict, brand: str) -> str:
-    s = snapshot["summary"]
-    rows = ""
-    for q in snapshot.get("reit_metrics", snapshot.get("reits", []))[:8]:
-        ticker = q.get("ticker", q.get("symbol", "—"))
-        change = q.get("percent_change") or 0
-        up = change >= 0
-        c = GAIN if up else (LOSS if change < 0 else MUTED)
-        yield_text = f"{q['yield_ttm']:.2f}% TTM yield" if q.get("yield_ttm") is not None else "TTM yield unavailable"
-        minimum_text = f"Min ₱{q['minimum_investment']:,.2f}" if q.get("minimum_investment") is not None else "Minimum unavailable"
-        price_text = f"₱{q['price']:,.2f}" if q.get("price") is not None else "Price unavailable"
-        rows += (f'<div style="display:flex;align-items:center;padding:22px 30px;background:#0d1630;border:1px solid #16203c;'
-                 f'border-radius:14px;margin-bottom:12px;font-size:30px">'
-                 f'<span style="font-weight:800;width:180px">{ticker}</span>'
-                 f'<span style="color:#8b9bbd;flex:1;font-size:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:16px">{yield_text} · {minimum_text}</span>'
-                 f'<span style="width:180px;text-align:right">{price_text}</span>'
-                 f'<span style="width:150px;text-align:right;font-weight:800;color:{c}">{change:+.2f}%</span></div>')
-    if not rows:
-        rows = '<div class="card" style="padding:40px;text-align:center;color:#5b6a8a;font-size:28px">REIT data unavailable today</div>'
-    body = f'<div style="margin-top:36px">{rows}</div>'
-    return _shell("REIT Board", _fmt_date(s["market_date"]), body, brand)
-
-
-def dividends_html(snapshot: dict, dividends: list[dict], brand: str) -> str:
-    s = snapshot["summary"]
-    cards = ""
-    shown = [d for d in dividends if d.get("company")][:5] or dividends[:5]
-    for d in shown:
-        company = d.get("company") or "See PSE Edge disclosure"
-        meta = []
-        if d.get("rate"):
-            meta.append(f'\u20b1{d["rate"]}/share')
-        if d.get("ex_date"):
-            meta.append(f'Ex: {d["ex_date"]}')
-        if d.get("record_date"):
-            meta.append(f'Rec: {d["record_date"]}')
-        if d.get("payment_date"):
-            meta.append(f'Pay: {d["payment_date"]}')
-        meta_html = " \u00b7 ".join(meta) if meta else d.get("disclosure_date", "")
-        cards += f"""
-<div class="card" style="padding:28px 34px;margin-bottom:16px">
-  <div style="font-size:31px;font-weight:700">{company}</div>
-  <div style="color:{GAIN};font-size:24px;margin-top:6px;font-weight:600">Cash Dividend Declared</div>
-  <div style="color:#8b9bbd;font-size:23px;margin-top:10px">{meta_html}</div>
-</div>"""
-    if not cards:
-        cards = '<div class="card" style="padding:48px;text-align:center;color:#5b6a8a;font-size:28px">No cash dividend declarations found in the TTM window</div>'
-    body = f'<div style="margin-top:34px">{cards}</div>'
-    return _shell("Dividend Watch", f"Declarations \u00b7 as of {_fmt_date(s['market_date'])}", body, brand,
-                  footer_note="Source: PSE Edge disclosures")
+def next_html(snapshot: dict, brand: str, background: str | Path | None = None) -> str:
+    sectors = sorted((x for x in snapshot.get("sectors", []) if x.get("change_percent") is not None), key=lambda x: abs(x["change_percent"]), reverse=True)
+    sector_name = sectors[0]["name"] if sectors else "sector rotation"
+    active = (snapshot.get("actives") or [{}])[0]
+    content = _header(snapshot, brand) + f"""
+<div class='grid' style='opacity:.28'></div><div class='orb' style='width:900px;height:900px;right:-380px;top:110px;background:radial-gradient(circle,rgba(119,149,255,.28),rgba(32,43,104,.1) 42%,transparent 70%)'></div>
+<div style='margin-top:115px;position:relative;z-index:4'><div class='headline'>WHAT'S<br>NEXT</div><div class='subhead' style='margin-top:24px'>Keep the lens on the next catalyst, not just the last close.</div></div>
+<div class='bottom'><div class='watch-grid'><div class='watch'><div class='watch-title'>PSEi follow-through</div><div class='watch-copy'>Watch whether today's move extends into the next session.</div></div><div class='watch'><div class='watch-title'>{escape(sector_name)}</div><div class='watch-copy'>The day's largest sector move remains a key read on rotation.</div></div><div class='watch'><div class='watch-title'>{escape(active.get('symbol','Market activity'))}</div><div class='watch-copy'>Most active by value in the latest PSE close.</div></div><div class='watch'><div class='watch-title'>Global pulse</div><div class='watch-copy'>Track FX, oil and overnight risk appetite before the open.</div></div></div><div class='stat' style='margin-top:44px'><div class='label'>NEXT SESSION MARKER</div><div style='font-size:42px;font-weight:700;margin-top:9px'>PSE OPEN · WATCH THE TAPE</div></div>{_footer()}"""
+    return _shell(content, "hero-next", background)
 
 
 def build_all(snapshot: dict, dividends: list[dict], brand: str) -> dict[str, str]:
+    backgrounds = _backgrounds()
     return {
-        "market-summary": market_summary_html(snapshot, brand),
-        "movers": movers_html(snapshot, brand),
-        "sectors": sectors_html(snapshot, brand),
-        "reits": reits_html(snapshot, brand),
-        "dividends": dividends_html(snapshot, dividends, brand),
+        "big-move": big_move_html(snapshot, brand, backgrounds["big-move"]),
+        "market-drivers": market_drivers_html(snapshot, brand, backgrounds["market-drivers"]),
+        "whats-next": next_html(snapshot, brand, backgrounds["whats-next"]),
     }

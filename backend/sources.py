@@ -172,6 +172,35 @@ def _parse_official_thematic_indices(html: str) -> dict[str, IndexQuote]:
             value=round(value, 2), previous_close=round(value - change, 2),
             change_points=round(change, 2), change_percent=round(percent, 2),
         )
+
+    # The current PSE frame renders these as cards rather than table rows.
+    # Walk upward from the title until the card contains its Value/Change/%
+    # Change headers, then read the three values following those headers.
+    card_titles = {
+        # PSE splits "PSEi" and "Total Return" into separate span/div nodes.
+        "PSEi Total Return": re.compile(r"Total\s+Return", re.I),
+        "PSE DivY": re.compile(r"PSE\s+DivY", re.I),
+        "PSE MidCap": re.compile(r"PSE\s+MidCap", re.I),
+    }
+    for title, pattern in card_titles.items():
+        for text_node in soup.find_all(string=pattern):
+            parent = text_node.parent
+            for _ in range(10):
+                if parent is None:
+                    break
+                card_text = re.sub(r"\s+", " ", parent.get_text(" ", strip=True))
+                marker = re.search(r"Value\s+Change\s+%\s*Change", card_text, re.I)
+                if marker:
+                    numbers = re.findall(r"-?\d[\d,]*(?:\.\d+)?", card_text[marker.end():])
+                    if len(numbers) >= 3:
+                        value, change, percent = (float(item.replace(",", "")) for item in numbers[:3])
+                        out[title] = IndexQuote(
+                            symbol=title.upper().replace(" ", "_"), name=title,
+                            value=round(value, 2), previous_close=round(value - change, 2),
+                            change_points=round(change, 2), change_percent=round(percent, 2),
+                        )
+                        break
+                parent = parent.parent
     return out
 
 
@@ -286,8 +315,9 @@ async def fetch_market_overview(client: httpx.AsyncClient) -> dict:
             try:
                 official = await client.get(url, timeout=30, headers={"User-Agent": UA})
                 official.raise_for_status()
-                parser = _parse_pse_frames_indices if "frames.pse.com.ph" in url else _parse_official_thematic_indices
-                for name, value in parser(official.text).items():
+                parsed = _parse_pse_frames_indices(official.text) if "frames.pse.com.ph" in url else {}
+                parsed.update(_parse_official_thematic_indices(official.text))
+                for name, value in parsed.items():
                     if name not in indices:
                         indices[name] = value
             except Exception as e:

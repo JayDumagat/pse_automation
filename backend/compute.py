@@ -304,8 +304,8 @@ def qa_checks(snapshot: dict, graphics: list[dict], captions: list[dict]) -> lis
             flag("warning", f"{key}_board_lot", f"Missing PSE Edge Board Lot: " + ", ".join(missing_lots))
     if any(q.get("trades") is None for q in snapshot.get("actives", [])):
         flag("warning", "per_stock_trades", "Some PSEi per-stock trade counts were not available from the Investagrams Historical Data tab.")
-    if len(graphics) < 5:
-        flag("warning", "graphics_count", f"Only {len(graphics)}/5 graphics were generated")
+    if len(graphics) < 3:
+        flag("warning", "graphics_count", f"Only {len(graphics)}/3 graphics were generated")
     for g in graphics:
         if g.get("size_bytes", 0) < 20000:
             flag("warning", "graphic_size", f"Graphic {g['type']} looks too small ({g.get('size_bytes', 0)} bytes)")

@@ -58,11 +58,9 @@ export const fmtLongDate = (isoDate) => {
 };
 
 export const GRAPHIC_LABELS = {
-  "market-summary": "Market Summary",
-  movers: "Top Movers",
-  sectors: "Sector Performance",
-  reits: "REIT Board",
-  dividends: "Dividend Watch",
+  "big-move": "The Big Move",
+  "market-drivers": "What Moved the Market",
+  "whats-next": "What's Next",
 };
 
 export const PLATFORM_LABELS = {

@@ -5,7 +5,12 @@ import { toast } from "sonner";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/shared/bits";
@@ -41,7 +46,9 @@ const PngCard = ({ g, runId, onApprove }) => {
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl border-border bg-popover p-4">
-            <DialogTitle className="font-display">{GRAPHIC_LABELS[g.type]}</DialogTitle>
+            <DialogTitle className="font-display">
+              {GRAPHIC_LABELS[g.type]}
+            </DialogTitle>
             <img src={src} alt={g.type} className="w-full rounded-lg" />
           </DialogContent>
         </Dialog>
@@ -49,7 +56,9 @@ const PngCard = ({ g, runId, onApprove }) => {
       <CardContent className="space-y-3 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="font-display text-sm font-semibold">{GRAPHIC_LABELS[g.type] || g.type}</div>
+            <div className="font-display text-sm font-semibold">
+              {GRAPHIC_LABELS[g.type] || g.type}
+            </div>
             <div className="font-mono text-[11px] text-muted-foreground">
               {g.width}×{g.height} · {Math.round((g.size_bytes || 0) / 1024)} KB
             </div>
@@ -63,7 +72,12 @@ const PngCard = ({ g, runId, onApprove }) => {
             />
           </label>
         </div>
-        <Button data-testid={`graphics-${g.type}-download-button`} asChild size="sm" className="w-full">
+        <Button
+          data-testid={`graphics-${g.type}-download-button`}
+          asChild
+          size="sm"
+          className="w-full"
+        >
           <a href={dlHref} download={`pse-daily-${g.type}.png`}>
             <Download className="mr-1.5 h-4 w-4" /> Download PNG
           </a>
@@ -87,7 +101,9 @@ export default function GraphicsPage() {
         const gRes = await api.get(`/runs/${runRes.data.id}/graphics`);
         setGraphics(gRes.data);
       }
-    } catch { /* noop */ } finally {
+    } catch {
+      /* noop */
+    } finally {
       setLoaded(true);
     }
   }, []);
@@ -101,8 +117,12 @@ export default function GraphicsPage() {
   const approve = async (gtype, approved) => {
     try {
       await api.patch(`/graphics/${run.id}/${gtype}/approve`, { approved });
-      setGraphics((gs) => gs.map((g) => (g.type === gtype ? { ...g, approved } : g)));
-      toast.success(`${GRAPHIC_LABELS[gtype]} ${approved ? "approved" : "unapproved"}`);
+      setGraphics((gs) =>
+        gs.map((g) => (g.type === gtype ? { ...g, approved } : g)),
+      );
+      toast.success(
+        `${GRAPHIC_LABELS[gtype]} ${approved ? "approved" : "unapproved"}`,
+      );
     } catch {
       toast.error("Failed to update approval");
     }
@@ -122,14 +142,23 @@ export default function GraphicsPage() {
     toast.success("Downloading all graphics…");
   };
 
-  if (!loaded) return <div className="py-24 text-center text-sm text-muted-foreground">Loading…</div>;
+  if (!loaded)
+    return (
+      <div className="py-24 text-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
 
   if (!run || graphics.length === 0) {
     return (
       <EmptyState
         icon={ImageIcon}
         title="No graphics yet"
-        message={run?.status === "running" ? "Pipeline is running — graphics will appear once rendered." : "Run the pipeline to render today's 5 social graphics from live PSE data."}
+        message={
+          run?.status === "running"
+            ? "Pipeline is running — graphics will appear once rendered."
+            : "Run the pipeline to render today's 3-slide PSE Market Wrap."
+        }
         actionLabel="Go to pipeline"
         onAction={() => navigate("/runs")}
         actionTestId="graphics-goto-pipeline-button"
@@ -141,12 +170,19 @@ export default function GraphicsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-xl font-semibold">Generated graphics</h2>
+          <h2 className="font-display text-xl font-semibold">
+            Generated graphics
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {graphics.length} graphics · 1080×1350 · market date {run.market_date || "—"}
+            {graphics.length} graphics · 1080×1350 · market date{" "}
+            {run.market_date || "—"}
           </p>
         </div>
-        <Button data-testid="graphics-download-all-button" variant="secondary" onClick={downloadAll}>
+        <Button
+          data-testid="graphics-download-all-button"
+          variant="secondary"
+          onClick={downloadAll}
+        >
           <Download className="mr-1.5 h-4 w-4" /> Download all
         </Button>
       </div>

@@ -15,7 +15,7 @@ import compute as compute_mod
 import graphics_templates
 import renderer
 import sources
-from models import PLATFORMS, STAGES, SettingsModel
+from models import GRAPHIC_TYPES, PLATFORMS, STAGES, SettingsModel
 
 logger = logging.getLogger("pipeline")
 
@@ -200,10 +200,10 @@ async def run_pipeline(db, run_id: str):
                 graphics_meta = await renderer.render_graphics(run_id, html_map)
                 for g in graphics_meta:
                     await db.graphics.insert_one({**g, "id": str(uuid.uuid4()), "created_at": now_iso()})
-                status = "success" if len(graphics_meta) == 5 else "warning"
+                status = "success" if len(graphics_meta) == len(GRAPHIC_TYPES) else "warning"
                 await _update_stage(db, run_id, "graphics", status, meta={"generated": len(graphics_meta)})
-                if len(graphics_meta) < 5:
-                    warnings.append(f"Only {len(graphics_meta)}/5 graphics generated")
+                if len(graphics_meta) < len(GRAPHIC_TYPES):
+                    warnings.append(f"Only {len(graphics_meta)}/{len(GRAPHIC_TYPES)} graphics generated")
             except Exception as ge:
                 warnings.append(f"Graphics generation failed: {ge}")
                 await _update_stage(db, run_id, "graphics", "failed", error=str(ge))

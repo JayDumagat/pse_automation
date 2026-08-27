@@ -25,7 +25,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import pipeline  # noqa: E402
 import renderer  # noqa: E402
-from models import GRAPHIC_TYPES, PLATFORMS, SettingsModel  # noqa: E402
+from models import GRAPHIC_TYPES, LEGACY_GRAPHIC_TYPES, PLATFORMS, SettingsModel  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("server")
@@ -215,7 +215,7 @@ async def run_graphics(run_id: str):
 
 @api.get("/graphics/file/{run_id}/{gtype}")
 async def graphic_file(run_id: str, gtype: str, download: bool = False):
-    if gtype not in GRAPHIC_TYPES:
+    if gtype not in (*GRAPHIC_TYPES, *LEGACY_GRAPHIC_TYPES):
         raise HTTPException(400, "Unknown graphic type")
     path = renderer.graphic_path(run_id, gtype)
     if not path.exists():

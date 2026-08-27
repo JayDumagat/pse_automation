@@ -81,6 +81,9 @@ class SettingsModel(BaseModel):
 
 PLATFORMS = ["instagram", "facebook", "linkedin", "x"]
 
-GRAPHIC_TYPES = ["market-summary", "movers", "sectors", "reits", "dividends"]
+GRAPHIC_TYPES = ["big-move", "market-drivers", "whats-next"]
+# Keep historical PNG URLs readable after the template set was reduced to the
+# three-slide Market Wrap. These are not generated for new runs.
+LEGACY_GRAPHIC_TYPES = ["market-summary", "movers", "sectors", "reits", "dividends"]
 
 STAGES = ["fetch", "validate", "compute", "store", "graphics", "captions", "qa", "ready"]
