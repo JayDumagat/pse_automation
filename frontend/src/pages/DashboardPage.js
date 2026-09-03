@@ -21,13 +21,15 @@ const MoversTable = ({ rows, mode, testId }) => (
         <TableHead>Symbol</TableHead>
         <TableHead className="hidden md:table-cell">Name</TableHead>
         <TableHead className="text-right">Price</TableHead>
-        <TableHead className="text-right">{mode === "active" ? "Value traded" : "Change"}</TableHead>
+        <TableHead className="text-right">{mode === "active" ? "Chg %" : "Change"}</TableHead>
+        {mode === "active" && <TableHead className="text-right">Value traded</TableHead>}
+        {mode === "active" && <TableHead className="text-right">Trades</TableHead>}
       </TableRow>
     </TableHeader>
     <TableBody>
       {rows.length === 0 && (
         <TableRow>
-          <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No data</TableCell>
+          <TableCell colSpan={mode === "active" ? 7 : 5} className="py-8 text-center text-muted-foreground">No data</TableCell>
         </TableRow>
       )}
       {rows.map((q, i) => (
@@ -36,16 +38,11 @@ const MoversTable = ({ rows, mode, testId }) => (
           <TableCell className="font-mono font-semibold">{q.symbol}</TableCell>
           <TableCell className="hidden max-w-[220px] truncate text-muted-foreground md:table-cell">{q.name}</TableCell>
           <TableCell className="text-right font-mono tabular-nums">₱{fmtNum(q.price)}</TableCell>
-          <TableCell className="text-right">
-            {mode === "active" ? (
-              <div className="font-mono tabular-nums">
-                <div>{pesoShort(q.value_traded)}</div>
-                <div className="text-[11px] text-muted-foreground">{q.trades === null || q.trades === undefined ? "trades —" : `${fmtNum(q.trades, 0)} trades`}</div>
-              </div>
-            ) : (
-              <Delta value={q.percent_change} />
-            )}
-          </TableCell>
+          <TableCell className="text-right"><Delta value={q.percent_change} /></TableCell>
+          {mode === "active" && <TableCell className="text-right">
+            <div className="font-mono tabular-nums">{pesoShort(q.value_traded)}</div>
+          </TableCell>}
+          {mode === "active" && <TableCell className="text-right font-mono tabular-nums">{q.trades === null || q.trades === undefined ? "—" : fmtNum(q.trades, 0)}</TableCell>}
         </TableRow>
       ))}
     </TableBody>
@@ -68,7 +65,7 @@ const IndexBoardTable = ({ rows }) => (
           <TableRow key={index.name} className="hover:bg-accent/40">
             <TableCell className="font-medium">{index.name}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{fmtNum(index.value)}</TableCell>
-            <TableCell className="text-right"><Delta value={index.change_points} /></TableCell>
+            <TableCell className="text-right"><Delta value={index.change_points} suffix="" /></TableCell>
             <TableCell className="text-right"><Delta value={index.change_percent} /></TableCell>
           </TableRow>
         ))}
@@ -79,13 +76,12 @@ const IndexBoardTable = ({ rows }) => (
 
 const IncomeTable = ({ rows, kind, testId }) => (
   <div className="overflow-x-auto">
-    <Table data-testid={testId} className={kind === "reit" ? "[&_tbody_td:nth-child(3)]:hidden [&_tbody_td:nth-child(6)]:hidden" : ""}>
+    <Table data-testid={testId}>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead>Ticker</TableHead>
           <TableHead className="text-right">Price</TableHead>
           <TableHead className="text-right">Chg %</TableHead>
-          {kind !== "reit" && <TableHead className="text-right">Board lot</TableHead>}
           <TableHead className="text-right">{kind === "reit" ? "Value turnover" : "Div/share TTM"}</TableHead>
           <TableHead className="text-right">Yield TTM</TableHead>
           <TableHead className="text-right">Min investment</TableHead>
@@ -96,10 +92,8 @@ const IncomeTable = ({ rows, kind, testId }) => (
           <TableRow key={item.ticker} className="hover:bg-accent/40">
             <TableCell className="font-mono font-semibold">{item.ticker}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{item.price === null || item.price === undefined ? "—" : `₱${fmtNum(item.price)}`}</TableCell>
-            <TableCell className="text-right font-mono tabular-nums">{item.board_lot === null || item.board_lot === undefined ? "—" : fmtNum(item.board_lot, 0)}</TableCell>
             <TableCell className="text-right"><Delta value={item.percent_change} /></TableCell>
-            {kind === "reit" && <TableCell className="text-right font-mono tabular-nums">{pesoShort(item.value_turnover ?? item.value_traded)}</TableCell>}
-            <TableCell className="text-right font-mono tabular-nums">{item.dividend_per_share_ttm === null || item.dividend_per_share_ttm === undefined ? "—" : `₱${fmtNum(item.dividend_per_share_ttm, 4)}`}</TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{kind === "reit" ? pesoShort(item.value_turnover ?? item.value_traded) : (item.dividend_per_share_ttm === null || item.dividend_per_share_ttm === undefined ? "—" : `₱${fmtNum(item.dividend_per_share_ttm, 4)}`)}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{item.yield_ttm === null || item.yield_ttm === undefined ? "—" : `${fmtNum(item.yield_ttm)}%`}</TableCell>
             <TableCell className="text-right font-mono tabular-nums">{item.minimum_investment === null || item.minimum_investment === undefined ? "—" : `₱${fmtNum(item.minimum_investment)}`}</TableCell>
           </TableRow>

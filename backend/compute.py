@@ -9,8 +9,8 @@ from models import (
 
 
 INDEX_BOARD_ORDER = [
-    "PSEi", "PSEi Total Return", "All Shares", "PSE DivY", "PSE MidCap",
-    "Financials", "Industrial", "Holding Firms", "Property", "Services", "Mining & Oil",
+    "PSEi", "All Shares", "Financials", "Industrial", "Holding Firms", "Property",
+    "Services", "Mining & Oil", "PSEi Total Return", "PSE DivY", "PSE MidCap",
 ]
 
 SECTOR_BOARD_ORDER = [
