@@ -18,7 +18,7 @@ export default function HistoryPage() {
     try {
       const params = statusFilter !== "all" ? { status: statusFilter } : {};
       const res = await api.get("/runs", { params: { limit: 50, ...params } });
-      setRuns(res.data);
+      setRuns(Array.isArray(res.data) ? res.data : []);
     } catch { /* noop */ } finally {
       setLoaded(true);
     }

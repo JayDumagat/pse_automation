@@ -90,7 +90,7 @@ export default function CaptionsPage() {
       setRun(runRes.data);
       if (runRes.data?.id) {
         const cRes = await api.get(`/runs/${runRes.data.id}/captions`);
-        setCaptions(cRes.data);
+        setCaptions(Array.isArray(cRes.data) ? cRes.data : []);
       }
     } catch { /* noop */ } finally {
       setLoaded(true);
@@ -100,7 +100,9 @@ export default function CaptionsPage() {
   useEffect(() => { load(); }, [load]);
 
   const onUpdated = (doc) => {
-    setCaptions((cs) => cs.map((c) => (c.platform === doc.platform ? doc : c)));
+    setCaptions((cs) =>
+      (Array.isArray(cs) ? cs : []).map((c) => (c.platform === doc.platform ? doc : c)),
+    );
   };
 
   if (!loaded) return <div className="py-24 text-center text-sm text-muted-foreground">Loading…</div>;

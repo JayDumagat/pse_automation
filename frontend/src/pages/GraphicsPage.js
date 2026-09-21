@@ -99,7 +99,7 @@ export default function GraphicsPage() {
       setRun(runRes.data);
       if (runRes.data?.id) {
         const gRes = await api.get(`/runs/${runRes.data.id}/graphics`);
-        setGraphics(gRes.data);
+        setGraphics(Array.isArray(gRes.data) ? gRes.data : []);
       }
     } catch {
       /* noop */
@@ -118,7 +118,7 @@ export default function GraphicsPage() {
     try {
       await api.patch(`/graphics/${run.id}/${gtype}/approve`, { approved });
       setGraphics((gs) =>
-        gs.map((g) => (g.type === gtype ? { ...g, approved } : g)),
+        (Array.isArray(gs) ? gs : []).map((g) => (g.type === gtype ? { ...g, approved } : g)),
       );
       toast.success(
         `${GRAPHIC_LABELS[gtype]} ${approved ? "approved" : "unapproved"}`,

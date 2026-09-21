@@ -124,7 +124,7 @@ export default function RunsPage() {
           <CardTitle className="font-display text-base">Stages</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          <PipelineStageRail stages={run.stages || []} />
+          <PipelineStageRail stages={Array.isArray(run.stages) ? run.stages : []} />
           <Table data-testid="stage-detail-table">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -135,7 +135,7 @@ export default function RunsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(run.stages || []).map((st) => (
+              {(Array.isArray(run.stages) ? run.stages : []).map((st) => (
                 <TableRow key={st.name} className="hover:bg-accent/40">
                   <TableCell className="font-medium capitalize">{st.name}</TableCell>
                   <TableCell>
@@ -182,7 +182,7 @@ export default function RunsPage() {
         </CardContent>
       </Card>
 
-      {(run.qa_flags || []).length > 0 && (
+      {(Array.isArray(run.qa_flags) ? run.qa_flags : []).length > 0 && (
         <Card data-testid="qa-flags-card">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-display text-base">
@@ -190,7 +190,7 @@ export default function RunsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {run.qa_flags.map((f, i) => (
+            {(Array.isArray(run.qa_flags) ? run.qa_flags : []).map((f, i) => (
               <div key={i} className={`rounded-lg border p-3 text-sm ${f.severity === "error" ? "border-rose-400/30 bg-rose-400/10 text-rose-200" : "border-amber-400/30 bg-amber-400/10 text-amber-200"}`}>
                 <span className="font-mono text-xs uppercase opacity-70">[{f.check}]</span> {f.message}
               </div>

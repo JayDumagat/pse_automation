@@ -13,6 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 
+const normalizeSettings = (value) => ({
+  ...(value || {}),
+  reit_tickers: Array.isArray(value?.reit_tickers) ? value.reit_tickers : [],
+  divy_tickers: Array.isArray(value?.divy_tickers) ? value.divy_tickers : [],
+  psei_tickers: Array.isArray(value?.psei_tickers) ? value.psei_tickers : [],
+});
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState(null);
   const [newTicker, setNewTicker] = useState("");
@@ -22,7 +29,7 @@ export default function SettingsPage() {
   const load = useCallback(async () => {
     try {
       const sRes = await api.get("/settings");
-      setSettings(sRes.data);
+      setSettings(normalizeSettings(sRes.data));
     } catch {
       toast.error("Failed to load settings");
     }
@@ -137,7 +144,7 @@ export default function SettingsPage() {
               className="max-w-52 bg-secondary/40 font-mono"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && newTicker.trim()) {
-                  setSettings((s) => ({ ...s, reit_tickers: [...new Set([...s.reit_tickers, newTicker.trim()])] }));
+                  setSettings((s) => ({ ...s, reit_tickers: [...new Set([...(s.reit_tickers || []), newTicker.trim()])] }));
                   setNewTicker("");
                 }
               }}
@@ -147,7 +154,7 @@ export default function SettingsPage() {
               variant="secondary"
               disabled={!newTicker.trim()}
               onClick={() => {
-                setSettings((s) => ({ ...s, reit_tickers: [...new Set([...s.reit_tickers, newTicker.trim()])] }));
+                setSettings((s) => ({ ...s, reit_tickers: [...new Set([...(s.reit_tickers || []), newTicker.trim()])] }));
                 setNewTicker("");
               }}
             >
@@ -187,7 +194,7 @@ export default function SettingsPage() {
               className="max-w-52 bg-secondary/40 font-mono"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && newDivyTicker.trim()) {
-                  setSettings((s) => ({ ...s, divy_tickers: [...new Set([...s.divy_tickers, newDivyTicker.trim()])] }));
+                  setSettings((s) => ({ ...s, divy_tickers: [...new Set([...(s.divy_tickers || []), newDivyTicker.trim()])] }));
                   setNewDivyTicker("");
                 }
               }}
@@ -197,7 +204,7 @@ export default function SettingsPage() {
               variant="secondary"
               disabled={!newDivyTicker.trim()}
               onClick={() => {
-                setSettings((s) => ({ ...s, divy_tickers: [...new Set([...s.divy_tickers, newDivyTicker.trim()])] }));
+                setSettings((s) => ({ ...s, divy_tickers: [...new Set([...(s.divy_tickers || []), newDivyTicker.trim()])] }));
                 setNewDivyTicker("");
               }}
             >

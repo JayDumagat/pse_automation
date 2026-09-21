@@ -38,10 +38,11 @@ export default function PublishingPage() {
       setRun(runRes.data);
       if (runRes.data?.id) {
         const pRes = await api.get(`/runs/${runRes.data.id}/publishing`);
-        setRecords(pRes.data);
+        const publishingRecords = Array.isArray(pRes.data) ? pRes.data : [];
+        setRecords(publishingRecords);
         setNotes((n) => {
           const next = { ...n };
-          pRes.data.forEach((r) => {
+          publishingRecords.forEach((r) => {
             if (next[r.platform] === undefined) next[r.platform] = r.note || "";
           });
           return next;
@@ -57,7 +58,9 @@ export default function PublishingPage() {
   const setStatus = async (platform, status) => {
     try {
       const res = await api.post("/publish", { run_id: run.id, platform, status, note: notes[platform] || "" });
-      setRecords((rs) => rs.map((r) => (r.platform === platform ? res.data : r)));
+      setRecords((rs) =>
+        (Array.isArray(rs) ? rs : []).map((r) => (r.platform === platform ? res.data : r)),
+      );
       toast.success(`${PLATFORM_LABELS[platform]} marked ${status}`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to update status");

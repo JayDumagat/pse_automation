@@ -122,7 +122,12 @@ export const AppShell = ({ children }) => {
         api.get("/notifications?limit=15"),
       ]);
       setLatestRun(runRes.data);
-      setNotifications(notifRes.data);
+      const notificationData = notifRes.data && typeof notifRes.data === "object" ? notifRes.data : {};
+      setNotifications({
+        ...notificationData,
+        items: Array.isArray(notificationData.items) ? notificationData.items : [],
+        unread: Number.isFinite(notificationData.unread) ? notificationData.unread : 0,
+      });
     } catch {
       /* backend unreachable; keep last state */
     }

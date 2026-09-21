@@ -13,7 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Delta, EmptyState, RunStatusPill, SectionTitle } from "@/components/shared/bits";
 import { api, fmtDateTime, fmtLongDate, fmtNum, pesoShort } from "@/lib/api";
 
-const MoversTable = ({ rows, mode, testId }) => (
+const MoversTable = ({ rows = [], mode, testId }) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return (
   <Table data-testid={testId}>
     <TableHeader>
       <TableRow className="hover:bg-transparent">
@@ -27,12 +29,12 @@ const MoversTable = ({ rows, mode, testId }) => (
       </TableRow>
     </TableHeader>
     <TableBody>
-      {rows.length === 0 && (
+      {safeRows.length === 0 && (
         <TableRow>
           <TableCell colSpan={mode === "active" ? 7 : 5} className="py-8 text-center text-muted-foreground">No data</TableCell>
         </TableRow>
       )}
-      {rows.map((q, i) => (
+      {safeRows.map((q, i) => (
         <TableRow key={q.symbol} className="hover:bg-accent/40">
           <TableCell className="text-muted-foreground">{i + 1}</TableCell>
           <TableCell className="font-mono font-semibold">{q.symbol}</TableCell>
@@ -47,7 +49,8 @@ const MoversTable = ({ rows, mode, testId }) => (
       ))}
     </TableBody>
   </Table>
-);
+  );
+};
 
 const IndexBoardTable = ({ rows }) => (
   <div className="overflow-x-auto">

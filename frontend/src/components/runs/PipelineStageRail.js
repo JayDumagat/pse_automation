@@ -19,9 +19,11 @@ const StageIcon = ({ status }) => {
   return <CircleDashed className="h-3.5 w-3.5 text-muted-foreground/50" />;
 };
 
-export const PipelineStageRail = ({ stages = [] }) => (
+export const PipelineStageRail = ({ stages = [] }) => {
+  const safeStages = Array.isArray(stages) ? stages : [];
+  return (
   <div className="flex flex-wrap items-center gap-y-3">
-    {stages.map((st, i) => (
+    {safeStages.map((st, i) => (
       <div key={st.name} className="flex items-center">
         <div
           data-testid={`pipeline-stage-${st.name}-status`}
@@ -44,8 +46,9 @@ export const PipelineStageRail = ({ stages = [] }) => (
             <span className="font-mono tabular-nums text-[10px] opacity-70">{st.duration_seconds}s</span>
           )}
         </div>
-        {i < stages.length - 1 && <div className="mx-1.5 h-px w-4 bg-border sm:w-6" />}
+        {i < safeStages.length - 1 && <div className="mx-1.5 h-px w-4 bg-border sm:w-6" />}
       </div>
     ))}
   </div>
-);
+  );
+};
