@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "create-react-app",
+  "installCommand": "npm ci --legacy-peer-deps --no-audit --no-fund",
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
+  "rewrites": [
+    {
+      "source": "/:page(runs|graphics|captions|publishing|history|settings)",
+      "destination": "/index.html"
+    }
+  ]
+}
