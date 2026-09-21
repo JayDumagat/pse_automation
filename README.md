@@ -62,3 +62,20 @@ No API key is required. Market data is collected from PSE/Phisix, PSE Edge, Trad
 - `mongo`: MongoDB 7 with a health check.
 - `backend`: FastAPI, APScheduler, PSE ingestion, Mongo persistence, and Playwright Chromium graphics rendering.
 - `frontend`: React production build served by Nginx; `/api` is reverse-proxied to the backend container.
+
+## Config-driven scrapers and orchestration
+
+Scrapers live in `backend/scrapers/` as YAML or JSON. Define an endpoint,
+optional `item_selector`, and field selectors (HTML CSS selectors or JSON dot
+paths). The backend validates configs before loading them and runs them through
+the reusable async orchestrator, which supports dependencies, retries,
+timeouts, and non-critical stages.
+
+The API exposes:
+
+- `GET /api/scrapers` to list available configs.
+- `PUT /api/scrapers/{name}` to create or replace a validated YAML config.
+- `POST /api/scrapers/{name}/run` to execute one config and return stage events and records.
+
+For a new HTML scraper, copy `backend/scrapers/example_headlines.yaml` and
+replace its URL and selectors. No scraper-specific Python code is required.

@@ -4,6 +4,7 @@ Pipeline: fetch -> validate -> compute -> store -> graphics -> captions -> qa ->
 import asyncio
 import logging
 import os
+import re
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -19,12 +20,20 @@ from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
+import yaml
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import pipeline  # noqa: E402
 import renderer  # noqa: E402
+from configurable_scraper import (  # noqa: E402
+    ScraperConfig,
+    list_scraper_configs,
+    load_scraper_config,
+    scrape,
+)
+from orchestrator import AutomationOrchestrator, Stage  # noqa: E402
 from models import GRAPHIC_TYPES, LEGACY_GRAPHIC_TYPES, PLATFORMS, SettingsModel  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -38,6 +47,7 @@ app = FastAPI(title="PSE Daily Pulse API")
 api = APIRouter(prefix="/api")
 
 scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Manila"))
+SCRAPER_CONFIG_DIR = Path(os.environ.get("SCRAPER_CONFIG_DIR", ROOT_DIR / "scrapers"))
 
 
 def now_iso() -> str:
@@ -68,6 +78,48 @@ class RegenerateRequest(BaseModel):
 @api.get("/")
 async def root():
     return {"message": "PSE Daily Pulse API", "status": "ok"}
+
+
+# ------------------------- config scrapers -------------------------
+@api.get("/scrapers")
+async def list_scrapers():
+    """List validated scraper definitions available in the config directory."""
+    return [config.model_dump(exclude_none=True) for config in list_scraper_configs(SCRAPER_CONFIG_DIR)]
+
+
+@api.put("/scrapers/{name}")
+async def save_scraper(name: str, body: ScraperConfig):
+    """Create or replace a YAML scraper definition.
+
+    The config is intentionally limited to the validated ScraperConfig model;
+    arbitrary Python code cannot be submitted through this endpoint.
+    """
+    if body.name != name:
+        raise HTTPException(400, "path name must match body.name")
+    SCRAPER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    path = SCRAPER_CONFIG_DIR / f"{name}.yaml"
+    path.write_text(yaml.safe_dump(body.model_dump(exclude_none=True), sort_keys=False), encoding="utf-8")
+    return {"saved": True, "name": name, "path": str(path)}
+
+
+@api.post("/scrapers/{name}/run")
+async def run_scraper(name: str):
+    """Run a config scraper through the common automation orchestrator."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name):
+        raise HTTPException(400, "invalid scraper name")
+    config_path = next((SCRAPER_CONFIG_DIR / f"{name}{suffix}" for suffix in (".yaml", ".yml", ".json")
+                        if (SCRAPER_CONFIG_DIR / f"{name}{suffix}").is_file()), None)
+    if config_path is None:
+        raise HTTPException(404, f"Scraper config '{name}' not found")
+    try:
+        config = load_scraper_config(config_path)
+        workflow = AutomationOrchestrator([
+            Stage("scrape", lambda _context: scrape(config), retries=0),
+        ])
+        result = await workflow.run()
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return result.as_dict()
 
 
 # ------------------------- market data -------------------------

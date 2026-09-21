@@ -1,0 +1,12 @@
+name: example_headlines
+url: https://example.com/
+content_type: html
+item_selector: article
+fields:
+  title:
+    selector: h2
+    attr: text
+    required: true
+  url:
+    selector: a
+    attr: href
